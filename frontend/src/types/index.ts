@@ -1,0 +1,142 @@
+export type Provider = 'gmail' | 'yahoo' | 'outlook' | 'imap'
+
+export interface User {
+  id: string
+  name: string
+  email: string
+  is_verified: boolean
+}
+
+export interface Account {
+  id: string
+  provider: Provider
+  email_address: string
+  display_name: string
+  is_active: boolean
+  last_synced_at: string | null
+  sync_status: 'pending' | 'syncing' | 'ok' | 'error'
+  unread_count: number
+}
+
+export interface EmailRow {
+  id: string
+  account_id: string
+  folder_role: string
+  from_name: string
+  from_email: string
+  subject: string
+  preview: string
+  is_read: boolean
+  is_starred: boolean
+  has_attachments: boolean
+  received_at: string
+}
+
+export interface Recipient {
+  name: string
+  email: string
+}
+
+export interface AttachmentMeta {
+  id: string
+  filename: string
+  content_type: string
+  size_bytes: number
+}
+
+export interface EmailDetail extends EmailRow {
+  to_recipients: Recipient[]
+  cc_recipients: Recipient[]
+  bcc_recipients: Recipient[]
+  body_text: string | null
+  body_html: string | null
+  attachments: AttachmentMeta[]
+}
+
+export interface Contact {
+  id: string
+  name: string
+  email: string
+  account_ids: string[]
+  email_count: number
+}
+
+export interface FolderCount {
+  folder: string
+  unread: number
+  total: number
+}
+
+export interface AccountSummary {
+  account_id: string
+  email_address: string
+  provider: Provider
+  folders: FolderCount[]
+}
+
+export interface Summary {
+  consolidated: FolderCount[]
+  accounts: AccountSummary[]
+}
+
+export type FolderRole = 'inbox' | 'sent' | 'drafts' | 'starred' | 'spam' | 'trash'
+export type ContactSubTab = 'all' | 'inbox' | 'sent' | 'drafts'
+export type FileType = 'pdf' | 'image' | 'doc' | 'sheet' | 'archive'
+
+export interface ThreadMessage extends EmailRow {
+  to_recipients: Recipient[]
+  body_text: string | null
+  body_html: string | null
+  attachments: AttachmentMeta[]
+  is_mine: boolean
+}
+
+export interface Label {
+  id: string
+  name: string
+  email_count: number
+  created_at: string
+}
+
+export interface TimelineMessage extends EmailRow {
+  to_recipients: Recipient[]
+  is_mine: boolean
+  position: number
+}
+
+export interface LabelDetail extends Label {
+  emails: TimelineMessage[]
+}
+
+/** A position inside a tab's navigation history. */
+export type TabLocation =
+  | { view: 'home' }
+  | { view: 'folders'; accountId: string }
+  | { view: 'breakdown'; folder: FolderRole }
+  | { view: 'list'; accountId?: string; folder: FolderRole; viaHome?: boolean }
+  | { view: 'email'; emailId: string; subject: string }
+  | { view: 'contact'; contactId: string; sub: ContactSubTab }
+  | { view: 'graph' }
+  | { view: 'search'; query: string; fileType?: FileType }
+  | { view: 'label'; labelId: string; name: string }
+  | { view: 'settings' }
+
+export interface BreadcrumbSegment {
+  label: string
+  loc?: TabLocation
+}
+
+export type TabKind = 'home' | 'account' | 'email' | 'contact' | 'label' | 'settings'
+
+export interface Tab {
+  id: string
+  kind: TabKind
+  /** dedupe key, e.g. account:<id>, email:<id>, contact:<id> */
+  key: string
+  title: string
+  provider?: Provider
+  history: TabLocation[]
+  historyIndex: number
+  /** breadcrumb prefix for email tabs (where the email was opened from) */
+  crumbPrefix?: BreadcrumbSegment[]
+}

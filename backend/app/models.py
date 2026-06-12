@@ -1,0 +1,230 @@
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .database import Base
+
+
+def _uuid() -> str:
+    return str(uuid.uuid4())
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(120))
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verify_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    verify_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reset_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    reset_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    accounts: Mapped[list["EmailAccount"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class EmailAccount(Base):
+    __tablename__ = "email_accounts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(20))  # gmail | yahoo | outlook | imap
+    email_address: Mapped[str] = mapped_column(String(255))
+    display_name: Mapped[str] = mapped_column(String(120), default="")
+
+    # OAuth tokens / IMAP password, encrypted with Fernet
+    access_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Manual IMAP settings
+    imap_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    imap_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    imap_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    imap_password_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    smtp_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    smtp_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sync_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|syncing|ok|error
+    sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    user: Mapped["User"] = relationship(back_populates="accounts")
+    emails: Mapped[list["Email"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+    folders: Mapped[list["Folder"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (UniqueConstraint("user_id", "email_address", name="uq_user_account"),)
+
+
+class Folder(Base):
+    __tablename__ = "folders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(ForeignKey("email_accounts.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))  # provider's raw folder name
+    # normalised role: inbox|sent|drafts|starred|spam|trash|custom
+    role: Mapped[str] = mapped_column(String(20), default="custom")
+    uidvalidity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_seen_uid: Mapped[int] = mapped_column(Integer, default=0)
+
+    account: Mapped["EmailAccount"] = relationship(back_populates="folders")
+
+    __table_args__ = (UniqueConstraint("account_id", "name", name="uq_account_folder"),)
+
+
+class Email(Base):
+    __tablename__ = "emails"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(ForeignKey("email_accounts.id"), index=True)
+    folder_role: Mapped[str] = mapped_column(String(20), index=True)  # normalised folder
+    folder_name: Mapped[str] = mapped_column(String(255), default="")
+    imap_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message_id: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+
+    from_name: Mapped[str] = mapped_column(String(255), default="")
+    from_email: Mapped[str] = mapped_column(String(255), default="", index=True)
+    to_recipients: Mapped[str] = mapped_column(Text, default="")  # JSON list
+    cc_recipients: Mapped[str] = mapped_column(Text, default="")  # JSON list
+    bcc_recipients: Mapped[str] = mapped_column(Text, default="")  # JSON list
+
+    subject: Mapped[str] = mapped_column(Text, default="")
+    preview: Mapped[str] = mapped_column(String(200), default="")
+    body_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_attachments: Mapped[bool] = mapped_column(Boolean, default=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    account: Mapped["EmailAccount"] = relationship(back_populates="emails")
+    attachments: Mapped[list["Attachment"]] = relationship(
+        back_populates="email", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "folder_name", "imap_uid", name="uq_account_folder_uid"),
+        Index("ix_emails_account_folder_received", "account_id", "folder_role", "received_at"),
+    )
+
+
+class Attachment(Base):
+    __tablename__ = "attachments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    email_id: Mapped[str] = mapped_column(ForeignKey("emails.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(512))
+    content_type: Mapped[str] = mapped_column(String(255), default="application/octet-stream")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    # attachment content is fetched on demand from IMAP; we store metadata only
+    imap_part: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    email: Mapped["Email"] = relationship(back_populates="attachments")
+
+
+class Contact(Base):
+    __tablename__ = "contacts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    # JSON list of account ids this contact appears in
+    account_ids: Mapped[str] = mapped_column(Text, default="[]")
+    email_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (UniqueConstraint("user_id", "email", name="uq_user_contact"),)
+
+
+class Label(Base):
+    __tablename__ = "labels"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    emails: Mapped[list["LabelEmail"]] = relationship(
+        back_populates="label", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_user_label"),)
+
+
+class LabelEmail(Base):
+    __tablename__ = "label_emails"
+
+    label_id: Mapped[str] = mapped_column(
+        ForeignKey("labels.id"), primary_key=True
+    )
+    email_id: Mapped[str] = mapped_column(
+        ForeignKey("emails.id"), primary_key=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    label: Mapped["Label"] = relationship(back_populates="emails")
+    email: Mapped["Email"] = relationship()
+
+
+class EmailEmbedding(Base):
+    """Cached embedding vector per email (JSON-encoded list of floats)."""
+
+    __tablename__ = "email_embeddings"
+
+    email_id: Mapped[str] = mapped_column(
+        ForeignKey("emails.id"), primary_key=True
+    )
+    model: Mapped[str] = mapped_column(String(80))
+    vector: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class SyncLog(Base):
+    __tablename__ = "sync_log"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(ForeignKey("email_accounts.id"), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="running")  # running|ok|error
+    new_emails: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -1,0 +1,381 @@
+import json
+import re
+from datetime import datetime, timezone
+
+from urllib.parse import quote
+
+import bleach
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import case, func, or_
+from sqlalchemy.orm import Session, selectinload
+
+from ..database import get_db
+from ..deps import get_current_user
+from ..models import Attachment, Email, EmailAccount, User
+from ..schemas import (
+    AccountSummary,
+    EmailDetailOut,
+    EmailPatchIn,
+    EmailRowOut,
+    FolderCount,
+    SendEmailIn,
+    SummaryOut,
+    ThreadMessageOut,
+)
+from ..services import imap_service
+from ..services.smtp_service import send_email
+from ..services.sync_service import connect_account
+
+router = APIRouter(prefix="/api/emails", tags=["emails"])
+
+FOLDERS = ["inbox", "sent", "drafts", "starred", "spam", "trash"]
+
+ALLOWED_TAGS = [
+    "a", "b", "i", "u", "em", "strong", "p", "br", "div", "span", "ul", "ol", "li",
+    "blockquote", "pre", "code", "h1", "h2", "h3", "h4", "h5", "h6", "table", "thead",
+    "tbody", "tr", "td", "th", "img", "hr", "font", "center", "small", "sub", "sup",
+]
+ALLOWED_ATTRS = {
+    "a": ["href", "title"],
+    "img": ["src", "alt", "width", "height"],
+    "*": ["style", "align", "valign", "width", "height", "color", "bgcolor"],
+}
+
+
+def _own_email(db: Session, user: User, email_id: str) -> Email:
+    row = db.get(Email, email_id)
+    if not row or row.account.user_id != user.id:
+        raise HTTPException(404, "Email not found")
+    return row
+
+
+# attachment file-type categories for the ?file_type= filter
+FILE_TYPE_MATCHERS: dict[str, list] = {
+    "pdf": [Attachment.content_type == "application/pdf",
+            Attachment.filename.ilike("%.pdf")],
+    "image": [Attachment.content_type.ilike("image/%")],
+    "doc": [Attachment.content_type.ilike("%msword%"),
+            Attachment.content_type.ilike("%wordprocessingml%"),
+            Attachment.filename.ilike("%.doc"),
+            Attachment.filename.ilike("%.docx")],
+    "sheet": [Attachment.content_type.ilike("%spreadsheetml%"),
+              Attachment.content_type.ilike("%ms-excel%"),
+              Attachment.content_type == "text/csv",
+              Attachment.filename.ilike("%.xls"),
+              Attachment.filename.ilike("%.xlsx"),
+              Attachment.filename.ilike("%.csv")],
+    "archive": [Attachment.content_type.ilike("%zip%"),
+                Attachment.content_type.ilike("%compressed%"),
+                Attachment.content_type.ilike("%x-tar%"),
+                Attachment.filename.ilike("%.zip"),
+                Attachment.filename.ilike("%.rar"),
+                Attachment.filename.ilike("%.7z"),
+                Attachment.filename.ilike("%.tar.gz")],
+}
+
+
+@router.get("", response_model=list[EmailRowOut])
+def list_emails(
+    account_id: str | None = None,
+    folder: str = "inbox",
+    search: str = "",
+    file_type: str | None = Query(None, pattern="^(pdf|image|doc|sheet|archive)$"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Email).join(EmailAccount).filter(EmailAccount.user_id == user.id)
+    if account_id:
+        q = q.filter(Email.account_id == account_id)
+    if folder == "starred":
+        q = q.filter(Email.is_starred.is_(True), Email.folder_role.notin_(["trash", "spam"]))
+    elif folder == "all":
+        q = q.filter(Email.folder_role.notin_(["trash", "spam"]))
+    else:
+        q = q.filter(Email.folder_role == folder)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            or_(
+                Email.subject.ilike(like),
+                Email.body_text.ilike(like),
+                Email.preview.ilike(like),
+                Email.from_email.ilike(like),
+                Email.from_name.ilike(like),
+            )
+        )
+    if file_type:
+        q = q.join(Attachment).filter(or_(*FILE_TYPE_MATCHERS[file_type])).distinct()
+    return (
+        q.order_by(Email.received_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+
+@router.get("/summary", response_model=SummaryOut)
+def summary(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    accounts = db.query(EmailAccount).filter(EmailAccount.user_id == user.id).all()
+    rows = (
+        db.query(
+            Email.account_id,
+            Email.folder_role,
+            func.count(Email.id),
+            func.sum(case((Email.is_read.is_(False), 1), else_=0)),
+            func.sum(case((Email.is_starred.is_(True), 1), else_=0)),
+        )
+        .join(EmailAccount)
+        .filter(EmailAccount.user_id == user.id)
+        .group_by(Email.account_id, Email.folder_role)
+        .all()
+    )
+
+    per_account: dict[str, dict[str, FolderCount]] = {}
+    for acc in accounts:
+        per_account[acc.id] = {f: FolderCount(folder=f, unread=0, total=0) for f in FOLDERS}
+    starred_unread: dict[str, int] = {}
+    for account_id, role, total, unread, starred in rows:
+        if account_id not in per_account:
+            continue
+        if role in per_account[account_id]:
+            per_account[account_id][role] = FolderCount(
+                folder=role, unread=int(unread or 0), total=int(total or 0)
+            )
+        if role not in ("trash", "spam"):
+            fc = per_account[account_id]["starred"]
+            per_account[account_id]["starred"] = FolderCount(
+                folder="starred", unread=fc.unread, total=fc.total + int(starred or 0)
+            )
+
+    consolidated = {f: FolderCount(folder=f, unread=0, total=0) for f in FOLDERS}
+    for counts in per_account.values():
+        for f in FOLDERS:
+            consolidated[f] = FolderCount(
+                folder=f,
+                unread=consolidated[f].unread + counts[f].unread,
+                total=consolidated[f].total + counts[f].total,
+            )
+
+    return SummaryOut(
+        consolidated=[consolidated[f] for f in FOLDERS],
+        accounts=[
+            AccountSummary(
+                account_id=acc.id,
+                email_address=acc.email_address,
+                provider=acc.provider,
+                folders=[per_account[acc.id][f] for f in FOLDERS],
+            )
+            for acc in accounts
+        ],
+    )
+
+
+_SUBJECT_PREFIX = re.compile(r"^\s*((re|fwd?|fw)\s*:\s*)+", re.IGNORECASE)
+
+
+def _sanitize_html(body_html: str | None) -> str | None:
+    if not body_html:
+        return body_html
+    return bleach.clean(
+        body_html, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS,
+        protocols=["http", "https", "mailto", "data"], strip=True,
+    )
+
+
+@router.get("/{email_id}/thread", response_model=list[ThreadMessageOut])
+def email_thread(
+    email_id: str,
+    limit: int = Query(100, ge=1, le=200),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """All messages in the same conversation, oldest first. Grouped by
+    normalised subject (Re:/Fwd: stripped) plus the counterpart address,
+    since References headers are not stored."""
+    root = _own_email(db, user, email_id)
+
+    my_addresses = {
+        a.email_address.lower()
+        for a in db.query(EmailAccount).filter(EmailAccount.user_id == user.id)
+    }
+    if root.from_email.lower() in my_addresses:
+        recipients = json.loads(root.to_recipients or "[]")
+        counterpart = (recipients[0].get("email", "") if recipients else "").lower()
+    else:
+        counterpart = root.from_email.lower()
+
+    core = _SUBJECT_PREFIX.sub("", (root.subject or "").lower()).strip()
+
+    q = (
+        db.query(Email)
+        .options(selectinload(Email.attachments))
+        .join(EmailAccount)
+        .filter(EmailAccount.user_id == user.id)
+        .filter(Email.folder_role.notin_(["trash", "spam"]))
+    )
+    if core:
+        norm = func.trim(
+            func.regexp_replace(
+                func.lower(Email.subject), r"^\s*((re|fwd?|fw)\s*:\s*)+", "", "i"
+            )
+        )
+        q = q.filter(norm == core)
+    if counterpart:
+        like = f"%{counterpart}%"
+        q = q.filter(
+            or_(
+                func.lower(Email.from_email) == counterpart,
+                Email.to_recipients.ilike(like),
+                Email.cc_recipients.ilike(like),
+            )
+        )
+    if not core and not counterpart:
+        q = q.filter(Email.id == root.id)
+
+    rows = q.order_by(Email.received_at.asc()).limit(limit).all()
+    if not any(r.id == root.id for r in rows):
+        rows.append(root)
+
+    return [
+        ThreadMessageOut(
+            **EmailRowOut.model_validate(r).model_dump(),
+            to_recipients=json.loads(r.to_recipients or "[]"),
+            body_text=r.body_text,
+            body_html=_sanitize_html(r.body_html),
+            attachments=r.attachments,
+            is_mine=r.from_email.lower() in my_addresses,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/{email_id}", response_model=EmailDetailOut)
+def get_email(email_id: str, user: User = Depends(get_current_user),
+              db: Session = Depends(get_db)):
+    row = (
+        db.query(Email)
+        .options(selectinload(Email.attachments))
+        .filter(Email.id == email_id)
+        .first()
+    )
+    if not row or row.account.user_id != user.id:
+        raise HTTPException(404, "Email not found")
+
+    body_html = row.body_html
+    if body_html:
+        body_html = bleach.clean(
+            body_html, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS,
+            protocols=["http", "https", "mailto", "data"], strip=True,
+        )
+
+    detail = EmailDetailOut(
+        **EmailRowOut.model_validate(row).model_dump(),
+        to_recipients=json.loads(row.to_recipients or "[]"),
+        cc_recipients=json.loads(row.cc_recipients or "[]"),
+        bcc_recipients=json.loads(row.bcc_recipients or "[]"),
+        body_text=row.body_text,
+        body_html=body_html,
+        attachments=row.attachments,
+    )
+    return detail
+
+
+@router.get("/{email_id}/attachments/{attachment_id}/download")
+def download_attachment(email_id: str, attachment_id: str,
+                        user: User = Depends(get_current_user),
+                        db: Session = Depends(get_db)):
+    row = _own_email(db, user, email_id)
+    att = db.get(Attachment, attachment_id)
+    if not att or att.email_id != row.id:
+        raise HTTPException(404, "Attachment not found")
+    if not row.imap_uid or not row.folder_name:
+        raise HTTPException(404, "Attachment content is not available for this email")
+
+    try:
+        client = connect_account(db, row.account)
+        try:
+            content = imap_service.fetch_attachment(
+                client, row.folder_name, row.imap_uid, att.filename, att.size_bytes
+            )
+        finally:
+            try:
+                client.logout()
+            except Exception:
+                pass
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Could not fetch attachment from mail server: {exc}")
+
+    if content is None:
+        raise HTTPException(404, "Attachment no longer exists on the mail server")
+
+    return Response(
+        content=content,
+        media_type=att.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition":
+                f"attachment; filename*=UTF-8''{quote(att.filename)}",
+        },
+    )
+
+
+@router.patch("/{email_id}", response_model=EmailRowOut)
+def patch_email(email_id: str, data: EmailPatchIn,
+                user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    row = _own_email(db, user, email_id)
+    if data.is_read is not None:
+        row.is_read = data.is_read
+    if data.is_starred is not None:
+        row.is_starred = data.is_starred
+    if data.folder_role is not None:
+        if data.folder_role not in FOLDERS + ["archive"]:
+            raise HTTPException(400, "Invalid folder")
+        row.folder_role = data.folder_role
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.post("/send", status_code=202)
+def send(data: SendEmailIn, user: User = Depends(get_current_user),
+         db: Session = Depends(get_db)):
+    account = db.get(EmailAccount, data.account_id)
+    if not account or account.user_id != user.id:
+        raise HTTPException(404, "Account not found")
+
+    in_reply_to = None
+    if data.reply_to_id:
+        original = _own_email(db, user, data.reply_to_id)
+        in_reply_to = original.message_id
+
+    try:
+        msg = send_email(
+            db, account, [str(a) for a in data.to], [str(a) for a in data.cc],
+            [str(a) for a in data.bcc], data.subject, data.body, in_reply_to,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Failed to send: {exc}")
+
+    # reflect it locally right away (provider will also place it in Sent)
+    sent_row = Email(
+        account_id=account.id,
+        folder_role="sent",
+        folder_name="__local_sent__",
+        message_id=msg.get("Message-ID"),
+        from_name=account.display_name or account.email_address,
+        from_email=account.email_address,
+        to_recipients=json.dumps([{"name": "", "email": str(a)} for a in data.to]),
+        cc_recipients=json.dumps([{"name": "", "email": str(a)} for a in data.cc]),
+        bcc_recipients=json.dumps([{"name": "", "email": str(a)} for a in data.bcc]),
+        subject=data.subject,
+        preview=data.body[:80],
+        body_text=data.body,
+        is_read=True,
+        received_at=datetime.now(timezone.utc),
+    )
+    db.add(sent_row)
+    db.commit()
+    return {"status": "sent", "email_id": sent_row.id}
