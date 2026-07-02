@@ -3,6 +3,7 @@
 import base64
 import smtplib
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,8 @@ def send_email(db: Session, account: EmailAccount, to: list[str], cc: list[str],
     if cc:
         msg["Cc"] = ", ".join(cc)
     msg["Subject"] = subject
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=account.email_address.rpartition("@")[2] or None)
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = in_reply_to

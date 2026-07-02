@@ -36,10 +36,11 @@
 
 ## Own mail server — BUILT 2026-06-13 as separate project at /opt/mailserver (docker-mailserver v15)
 - [x] Server running: mailserver container, ports 25/143/465/587/993, rspamd spam+DKIM, fail2ban, ClamAV off; healthy; IMAP login + local send/receive tested OK. Mailbox: arun@example.com (password in /opt/mailserver/CREDENTIALS.txt, chmod 600). DKIM keys generated (selector `mail`). Temp self-signed TLS cert.
-- [ ] USER: add DNS at Namecheap — (a) A record `mail` → YOUR_SERVER_IP, (b) MX `@` → mail.example.com prio 10, (c) TXT `mail._domainkey` → DKIM value from /opt/mailserver/docker-data/dms/config/rspamd/dkim/ (or ask Claude to print it), plus SPF record #5 below (shared with the relay)
-- [ ] USER: set PTR / reverse DNS at the VPS provider's panel: YOUR_SERVER_IP → mail.example.com (critical for Gmail to accept mail)
-- [ ] CLAUDE after DNS live: certbot cert for mail.example.com + swap SSL_TYPE=manual→letsencrypt (steps in /opt/mailserver/README.md); add --deploy-hook to renew cron
-- [ ] CLAUDE after cert: add arun@example.com to Unimail as IMAP account; receive test from Gmail (proves inbound port 25 unblocked — still unconfirmed), send test scored on mail-tester.com
+- [x] DNS at Namecheap added by user + verified propagated 2026-07-02: A `mail`, MX `@` prio 10, TXT SPF, TXT `mail._domainkey` (DKIM)
+- [ ] USER: set PTR / reverse DNS at your VPS provider panel: YOUR_SERVER_IP → mail.example.com (currently your-vps-hostname — critical for Gmail to accept mail)
+- [x] Let's Encrypt cert for mail.example.com issued 2026-07-02 (expires 2026-09-30, auto-renews); compose swapped to SSL_TYPE=letsencrypt; renew cron got --deploy-hook "docker restart mailserver"; IMAPS/SMTPS verified serving LE cert, IMAP login OK
+- [ ] USER: add arun@example.com to Unimail via web UI (+ Add Account → Other (IMAP)): IMAP mail.example.com:993 SSL, SMTP mail.example.com:465 SSL, password in /opt/mailserver/CREDENTIALS.txt
+- [ ] USER: receive test — send Gmail → arun@example.com (proves inbound port 25 unblocked, still unconfirmed); then send test scored on mail-tester.com (do AFTER PTR is set)
 
 ## Setup tasks (user)
 - [ ] Add 5 DNS records at Namecheap (Domain List → example.com → Advanced DNS), then tell Claude to verify:
