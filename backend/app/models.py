@@ -72,6 +72,9 @@ class EmailAccount(Base):
     smtp_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
     smtp_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # appended to outgoing messages composed in the app
+    signature: Mapped[str] = mapped_column(Text, default="")
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -174,6 +177,11 @@ class Contact(Base):
     account_ids: Mapped[str] = mapped_column(Text, default="[]")
     email_count: Mapped[int] = mapped_column(Integer, default=0)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # address-book fields; is_manual marks contacts the user created/edited
+    # themselves (protected from auto-derived name overwrites)
+    is_manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    phone: Mapped[str] = mapped_column(String(50), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
 
     __table_args__ = (UniqueConstraint("user_id", "email", name="uq_user_contact"),)
 
@@ -218,6 +226,44 @@ class EmailEmbedding(Base):
     )
     model: Mapped[str] = mapped_column(String(80))
     vector: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Upload(Base):
+    """A compose attachment uploaded ahead of send. The file bytes live in
+    object storage under key = id; on send the row becomes an Attachment
+    (same storage key) and is deleted. Stale rows are swept by a daily job."""
+
+    __tablename__ = "uploads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(512))
+    content_type: Mapped[str] = mapped_column(String(255), default="application/octet-stream")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class FilterRule(Base):
+    """User-defined message filter: conditions on incoming mail → actions.
+    Applied to newly synced inbox messages, or on demand via /run."""
+
+    __tablename__ = "filter_rules"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    # limit the rule to one account; NULL = all accounts
+    account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("email_accounts.id"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(120))
+    match_type: Mapped[str] = mapped_column(String(8), default="all")  # all|any
+    # JSON list of {"field": from|to|subject|body, "op": contains|not_contains|equals, "value": str}
+    conditions: Mapped[str] = mapped_column(Text, default="[]")
+    # JSON {"move_to": role|null, "label_id": str|null, "mark_read": bool, "star": bool}
+    actions: Mapped[str] = mapped_column(Text, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

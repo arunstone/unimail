@@ -4,6 +4,8 @@ import { useAccountsStore } from '../../stores/accountsStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useLabelsStore } from '../../stores/labelsStore'
 import { useTabsStore } from '../../stores/tabsStore'
+import { useUiStore } from '../../stores/uiStore'
+import { toast } from '../../stores/toastStore'
 import ProviderIcon from '../common/ProviderIcon'
 import { Wordmark } from '../common/ui'
 import AddAccountModal from './AddAccountModal'
@@ -13,8 +15,17 @@ export default function LeftPanel() {
   const { labels, openWorkspace } = useLabelsStore()
   const { openTab, activeTab } = useTabsStore()
   const logout = useAuthStore((s) => s.logout)
+  const openCompose = useUiStore((s) => s.openCompose)
   const [showAdd, setShowAdd] = useState(false)
   const active = activeTab()
+
+  const compose = () => {
+    if (accounts.length === 0) {
+      toast.error('Connect an email account first')
+      return
+    }
+    openCompose({})
+  }
 
   return (
     <aside className="flex h-full w-full flex-col bg-panel">
@@ -42,6 +53,9 @@ export default function LeftPanel() {
           </button>
         </div>
         <div className="text-caption text-muted">All your email in one place</div>
+        <button onClick={compose} className="btn-primary mt-3 w-full py-2 text-body">
+          ✏️ Compose
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">

@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import ComposePanel from '../components/common/ComposePanel'
 import LeftPanel from '../components/layout/LeftPanel'
 import MiddlePanel from '../components/layout/MiddlePanel'
 import RightPanel from '../components/layout/RightPanel'
 import WorkspacePanel from '../components/layout/WorkspacePanel'
+import { useNewMailNotifications, useTitleBadge } from '../lib/notifications'
 import { useAccountsStore } from '../stores/accountsStore'
 import { useContactsStore } from '../stores/contactsStore'
 import { useLabelsStore } from '../stores/labelsStore'
@@ -19,9 +21,13 @@ export default function Dashboard() {
   const fetchLabels = useLabelsStore((s) => s.fetchLabels)
   const workspaceOpen = useLabelsStore((s) => s.workspaceOpen)
   const [params, setParams] = useSearchParams()
-  const { leftDrawerOpen, rightDrawerOpen, closeDrawers } = useUiStore()
+  const { leftDrawerOpen, rightDrawerOpen, closeDrawers, composeSeed, closeCompose } =
+    useUiStore()
   const tabs = useTabsStore((s) => s.tabs)
   const activeTabId = useTabsStore((s) => s.activeTabId)
+
+  useNewMailNotifications()
+  useTitleBadge()
 
   // On mobile, navigating anywhere (new tab, new location) should dismiss
   // whichever drawer the tap came from.
@@ -99,6 +105,15 @@ export default function Dashboard() {
         <div
           className="fixed inset-0 z-30 bg-black/50 lg:hidden"
           onClick={closeDrawers}
+        />
+      )}
+
+      {composeSeed && (
+        <ComposePanel
+          key={composeSeed.draftId ?? 'new'}
+          seed={composeSeed}
+          onClose={closeCompose}
+          onSent={() => void refreshAll()}
         />
       )}
     </div>

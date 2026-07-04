@@ -36,6 +36,7 @@ class AccountOut(BaseModel):
     provider: str
     email_address: str
     display_name: str
+    signature: str = ""
     is_active: bool
     last_synced_at: datetime | None
     sync_status: str
@@ -43,6 +44,21 @@ class AccountOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AccountPatchIn(BaseModel):
+    display_name: str | None = None
+    signature: str | None = None
+
+
+class AutoconfigOut(BaseModel):
+    found: bool
+    source: str = ""  # isp-db | autoconfig | probe
+    imap_host: str | None = None
+    imap_port: int | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    username: str | None = None  # suggested login (full address or local part)
 
 
 class ImapAccountIn(BaseModel):
@@ -61,6 +77,8 @@ class EmailRowOut(BaseModel):
     id: str
     account_id: str
     folder_role: str
+    # "__local_draft__" marks drafts editable in the app
+    folder_name: str = ""
     from_name: str
     from_email: str
     subject: str
@@ -106,7 +124,77 @@ class SendEmailIn(BaseModel):
     bcc: list[EmailStr] = []
     subject: str
     body: str
+    body_html: str | None = None
+    attachment_ids: list[str] = []  # Upload ids not yet attached to a draft
+    draft_id: str | None = None  # send this draft (its attachments included)
     reply_to_id: str | None = None
+
+
+class UploadOut(BaseModel):
+    id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+
+    class Config:
+        from_attributes = True
+
+
+# ---- Drafts ----
+class DraftIn(BaseModel):
+    account_id: str
+    # free-form strings: a draft may hold half-typed addresses
+    to: list[str] = []
+    cc: list[str] = []
+    bcc: list[str] = []
+    subject: str = ""
+    body: str = ""
+    body_html: str | None = None
+    attachment_ids: list[str] = []  # Upload ids to attach
+    removed_attachment_ids: list[str] = []  # Attachment ids to detach (updates)
+
+
+class NewMailItem(BaseModel):
+    id: str
+    from_name: str
+    from_email: str
+    subject: str
+    account_email: str
+
+
+class NewMailOut(BaseModel):
+    count: int
+    latest: list[NewMailItem] = []
+    now: datetime  # server clock; pass back as ?since= on the next poll
+
+
+# ---- Filters ----
+class FilterConditionIn(BaseModel):
+    field: str  # from | to | subject | body
+    op: str = "contains"  # contains | not_contains | equals
+    value: str
+
+
+class FilterActionsIn(BaseModel):
+    move_to: str | None = None  # trash | spam | archive
+    label_id: str | None = None
+    mark_read: bool = False
+    star: bool = False
+
+
+class FilterRuleIn(BaseModel):
+    name: str
+    account_id: str | None = None
+    match_type: str = "all"  # all | any
+    conditions: list[FilterConditionIn]
+    actions: FilterActionsIn
+    enabled: bool = True
+
+
+class FilterRuleOut(FilterRuleIn):
+    id: str
+    position: int = 0
+    created_at: datetime
 
 
 class ThreadMessageOut(EmailRowOut):
@@ -156,6 +244,23 @@ class ContactOut(BaseModel):
     email: str
     account_ids: list[str]
     email_count: int
+    is_manual: bool = False
+    phone: str = ""
+    notes: str = ""
+
+
+class ContactCreateIn(BaseModel):
+    name: str = ""
+    email: EmailStr
+    phone: str = ""
+    notes: str = ""
+
+
+class ContactPatchIn(BaseModel):
+    name: str | None = None
+    email: EmailStr | None = None
+    phone: str | None = None
+    notes: str | None = None
 
 
 # ---- Summary ----

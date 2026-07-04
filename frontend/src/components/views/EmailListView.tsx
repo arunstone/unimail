@@ -3,10 +3,12 @@ import { api } from '../../api/client'
 import { FOLDER_LABELS, truncate } from '../../lib/utils'
 import { useAccountsStore } from '../../stores/accountsStore'
 import { useTabsStore } from '../../stores/tabsStore'
+import { useUiStore } from '../../stores/uiStore'
+import { toast } from '../../stores/toastStore'
 import EmptyState from '../common/EmptyState'
 import { SkeletonList, SkeletonRow } from '../common/Skeleton'
 import EmailRowItem from './EmailRowItem'
-import type { BreadcrumbSegment, EmailRow, FolderRole } from '../../types'
+import type { BreadcrumbSegment, EmailDetail, EmailRow, FolderRole } from '../../types'
 
 const PAGE_SIZE = 30
 
@@ -66,7 +68,34 @@ export default function EmailListView({
     return () => observer.disconnect()
   }, [page, loading, hasMore, fetchPage])
 
+  const openCompose = useUiStore((s) => s.openCompose)
+
+  const openDraft = async (email: EmailRow) => {
+    try {
+      const detail = await api.get<EmailDetail>(`/api/emails/${email.id}`)
+      openCompose({
+        accountId: detail.account_id,
+        to: detail.to_recipients.map((r) => r.email).join(', '),
+        cc: detail.cc_recipients.map((r) => r.email).join(', '),
+        bcc: detail.bcc_recipients.map((r) => r.email).join(', '),
+        subject: detail.subject,
+        body: detail.body_text ?? '',
+        bodyHtml: detail.body_html ?? undefined,
+        // drafts synced from the mail server open as a fresh copy — only
+        // drafts saved in Unimail are updated in place
+        draftId: email.folder_name === '__local_draft__' ? email.id : undefined,
+        attachments: email.folder_name === '__local_draft__' ? detail.attachments : [],
+      })
+    } catch {
+      toast.error('Could not open draft')
+    }
+  }
+
   const openEmail = (email: EmailRow) => {
+    if (email.folder_role === 'drafts') {
+      void openDraft(email)
+      return
+    }
     const account = accounts.find((a) => a.id === email.account_id)
     const accountLabel = account?.email_address.split('@')[0] ?? 'Account'
     const folderLabel = FOLDER_LABELS[folder]

@@ -6,23 +6,34 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 import bleach
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Attachment, Email, EmailAccount, User
+from ..models import Attachment, Email, EmailAccount, Upload, User
 from ..schemas import (
     AccountSummary,
     EmailDetailOut,
     EmailPatchIn,
     EmailRowOut,
     FolderCount,
+    NewMailItem,
+    NewMailOut,
     SendEmailIn,
     SummaryOut,
     ThreadMessageOut,
+    UploadOut,
 )
 from ..services import imap_actions, imap_service, storage
 from ..services.smtp_service import send_email
@@ -187,6 +198,80 @@ def summary(user: User = Depends(get_current_user), db: Session = Depends(get_db
             for acc in accounts
         ],
     )
+
+
+# declared before the /{email_id} routes so "new" / "uploads" aren't
+# captured as email ids
+@router.get("/new", response_model=NewMailOut)
+def new_mail(
+    since: datetime,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Inbox messages synced into the app after `since` — the browser polls
+    this to fire desktop notifications."""
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    q = (
+        db.query(Email, EmailAccount.email_address)
+        .join(EmailAccount)
+        .filter(
+            EmailAccount.user_id == user.id,
+            Email.folder_role == "inbox",
+            Email.created_at > since,
+        )
+        .order_by(Email.created_at.desc())
+    )
+    count = q.count()
+    latest = [
+        NewMailItem(id=e.id, from_name=e.from_name, from_email=e.from_email,
+                    subject=e.subject, account_email=account_email)
+        for e, account_email in q.limit(5).all()
+    ]
+    return NewMailOut(count=count, latest=latest, now=datetime.now(timezone.utc))
+
+
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
+@router.post("/uploads", response_model=UploadOut, status_code=201)
+async def upload_attachment(
+    file: UploadFile,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Stage a compose attachment in object storage; reference the returned
+    id in send/draft payloads."""
+    if not storage.enabled():
+        raise HTTPException(503, "Attachment storage is not configured")
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Attachment exceeds the 25 MB limit")
+    row = Upload(
+        user_id=user.id,
+        filename=file.filename or "attachment",
+        content_type=file.content_type or "application/octet-stream",
+        size_bytes=len(content),
+    )
+    db.add(row)
+    db.flush()
+    storage.put(row.id, content, row.content_type)
+    db.commit()
+    return row
+
+
+@router.delete("/uploads/{upload_id}", status_code=204)
+def delete_upload(upload_id: str, user: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)):
+    row = db.get(Upload, upload_id)
+    if not row or row.user_id != user.id:
+        raise HTTPException(404, "Upload not found")
+    db.delete(row)
+    db.commit()
+    try:
+        storage.delete_many([upload_id])
+    except Exception:
+        logger.warning("Could not delete stored upload %s", upload_id, exc_info=True)
 
 
 _SUBJECT_PREFIX = re.compile(r"^\s*((re|fwd?|fw)\s*:\s*)+", re.IGNORECASE)
@@ -404,32 +489,79 @@ def send(data: SendEmailIn, background: BackgroundTasks,
         original = _own_email(db, user, data.reply_to_id)
         in_reply_to = original.message_id
 
+    draft = None
+    if data.draft_id:
+        draft = _own_email(db, user, data.draft_id)
+        if draft.folder_role != "drafts":
+            raise HTTPException(400, "draft_id does not point at a draft")
+
+    # gather attachment payloads: the draft's stored attachments plus any
+    # freshly staged uploads
+    uploads: list[Upload] = []
+    if data.attachment_ids:
+        uploads = (
+            db.query(Upload)
+            .filter(Upload.id.in_(data.attachment_ids), Upload.user_id == user.id)
+            .all()
+        )
+        if len(uploads) != len(set(data.attachment_ids)):
+            raise HTTPException(404, "One of the attachments was not found")
+    att_payload: list[tuple[str, str, bytes]] = []
+    try:
+        for att in (draft.attachments if draft else []):
+            if att.storage_key:
+                body, _size = storage.get(att.storage_key)
+                att_payload.append((att.filename, att.content_type, body.read()))
+        for up in uploads:
+            body, _size = storage.get(up.id)
+            att_payload.append((up.filename, up.content_type, body.read()))
+    except Exception as exc:
+        raise HTTPException(502, f"Could not read stored attachment: {exc}")
+
+    body_html = _sanitize_html(data.body_html)
     try:
         msg = send_email(
             db, account, [str(a) for a in data.to], [str(a) for a in data.cc],
             [str(a) for a in data.bcc], data.subject, data.body, in_reply_to,
+            body_html=body_html, attachments=att_payload,
         )
     except Exception as exc:
         raise HTTPException(502, f"Failed to send: {exc}")
 
-    # reflect it locally right away (provider will also place it in Sent)
-    sent_row = Email(
-        account_id=account.id,
-        folder_role="sent",
-        folder_name="__local_sent__",
-        message_id=msg.get("Message-ID"),
-        from_name=account.display_name or account.email_address,
-        from_email=account.email_address,
-        to_recipients=json.dumps([{"name": "", "email": str(a)} for a in data.to]),
-        cc_recipients=json.dumps([{"name": "", "email": str(a)} for a in data.cc]),
-        bcc_recipients=json.dumps([{"name": "", "email": str(a)} for a in data.bcc]),
-        subject=data.subject,
-        preview=data.body[:80],
-        body_text=data.body,
-        is_read=True,
-        received_at=datetime.now(timezone.utc),
-    )
-    db.add(sent_row)
+    # reflect it locally right away (provider will also place it in Sent).
+    # A sent draft is repurposed in place — its attachment rows and their
+    # stored objects come along for free.
+    now = datetime.now(timezone.utc)
+    if draft is not None:
+        sent_row = draft
+        sent_row.account_id = account.id
+        sent_row.imap_uid = None
+    else:
+        sent_row = Email(account_id=account.id)
+        db.add(sent_row)
+    sent_row.folder_role = "sent"
+    sent_row.folder_name = "__local_sent__"
+    sent_row.message_id = msg.get("Message-ID")
+    sent_row.from_name = account.display_name or account.email_address
+    sent_row.from_email = account.email_address
+    sent_row.to_recipients = json.dumps([{"name": "", "email": str(a)} for a in data.to])
+    sent_row.cc_recipients = json.dumps([{"name": "", "email": str(a)} for a in data.cc])
+    sent_row.bcc_recipients = json.dumps([{"name": "", "email": str(a)} for a in data.bcc])
+    sent_row.subject = data.subject
+    sent_row.preview = data.body[:80]
+    sent_row.body_text = data.body
+    sent_row.body_html = body_html
+    sent_row.is_read = True
+    sent_row.received_at = now
+    db.flush()
+    # staged uploads become regular attachment rows on the sent email,
+    # keeping the already-stored object (key = upload id)
+    for up in uploads:
+        db.add(Attachment(email_id=sent_row.id, filename=up.filename,
+                          content_type=up.content_type, size_bytes=up.size_bytes,
+                          storage_key=up.id))
+        db.delete(up)
+    sent_row.has_attachments = bool(att_payload)
     db.commit()
     # plain-IMAP servers don't store a Sent copy on SMTP send; APPEND one so
     # other clients see it too. Gmail/Outlook/Yahoo store their own copy,

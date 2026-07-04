@@ -14,7 +14,10 @@ from .sync_service import _ensure_access_token
 
 def send_email(db: Session, account: EmailAccount, to: list[str], cc: list[str],
                bcc: list[str], subject: str, body: str,
-               in_reply_to: str | None = None) -> EmailMessage:
+               in_reply_to: str | None = None,
+               body_html: str | None = None,
+               attachments: list[tuple[str, str, bytes]] | None = None) -> EmailMessage:
+    """attachments: list of (filename, content_type, data)."""
     msg = EmailMessage()
     msg["From"] = account.email_address
     msg["To"] = ", ".join(to)
@@ -27,6 +30,12 @@ def send_email(db: Session, account: EmailAccount, to: list[str], cc: list[str],
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = in_reply_to
     msg.set_content(body)
+    if body_html:
+        msg.add_alternative(body_html, subtype="html")
+    for filename, content_type, data in attachments or []:
+        maintype, _, subtype = (content_type or "application/octet-stream").partition("/")
+        msg.add_attachment(data, maintype=maintype or "application",
+                           subtype=subtype or "octet-stream", filename=filename)
 
     host = account.smtp_host
     port = account.smtp_port or 587

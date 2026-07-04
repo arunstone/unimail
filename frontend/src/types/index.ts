@@ -12,6 +12,7 @@ export interface Account {
   provider: Provider
   email_address: string
   display_name: string
+  signature: string
   is_active: boolean
   last_synced_at: string | null
   sync_status: 'pending' | 'syncing' | 'ok' | 'error'
@@ -22,6 +23,8 @@ export interface EmailRow {
   id: string
   account_id: string
   folder_role: string
+  /** "__local_draft__" marks drafts editable in the app */
+  folder_name: string
   from_name: string
   from_email: string
   subject: string
@@ -59,6 +62,49 @@ export interface Contact {
   email: string
   account_ids: string[]
   email_count: number
+  is_manual: boolean
+  phone: string
+  notes: string
+}
+
+/** Seed for the global compose panel. */
+export interface ComposeSeed {
+  accountId?: string
+  to?: string
+  cc?: string
+  bcc?: string
+  subject?: string
+  body?: string
+  bodyHtml?: string
+  replyToId?: string
+  /** editing an existing local draft */
+  draftId?: string
+  attachments?: AttachmentMeta[]
+}
+
+export interface FilterCondition {
+  field: 'from' | 'to' | 'subject' | 'body'
+  op: 'contains' | 'not_contains' | 'equals'
+  value: string
+}
+
+export interface FilterActions {
+  move_to: 'trash' | 'spam' | 'archive' | null
+  label_id: string | null
+  mark_read: boolean
+  star: boolean
+}
+
+export interface FilterRule {
+  id: string
+  name: string
+  account_id: string | null
+  match_type: 'all' | 'any'
+  conditions: FilterCondition[]
+  actions: FilterActions
+  enabled: boolean
+  position: number
+  created_at: string
 }
 
 export interface FolderCount {

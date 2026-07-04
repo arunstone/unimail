@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, downloadFile } from '../../api/client'
-import { formatBytes, truncate } from '../../lib/utils'
+import { formatBytes, quoteHtml, truncate } from '../../lib/utils'
 import { useAccountsStore } from '../../stores/accountsStore'
 import { useTabsStore } from '../../stores/tabsStore'
+import { useUiStore } from '../../stores/uiStore'
 import { toast } from '../../stores/toastStore'
 import Avatar from '../common/Avatar'
-import ComposePanel, { type ComposeSeed } from '../common/ComposePanel'
 import { SkeletonList } from '../common/Skeleton'
 import type { ThreadMessage } from '../../types'
 
@@ -122,7 +122,7 @@ export default function EmailBodyView({ emailId }: { emailId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [reply, setReply] = useState('')
   const [sending, setSending] = useState(false)
-  const [compose, setCompose] = useState<ComposeSeed | null>(null)
+  const openCompose = useUiStore((s) => s.openCompose)
   const refreshAll = useAccountsStore((s) => s.refreshAll)
   const { closeTab, activeTabId } = useTabsStore()
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -195,12 +195,23 @@ export default function EmailBodyView({ emailId }: { emailId: string }) {
     }
   }
 
+  const replyQuoted = () => {
+    const original = lastIncoming ?? opened
+    openCompose({
+      accountId: original.account_id,
+      to: counterpart,
+      subject: opened.subject.startsWith('Re:') ? opened.subject : `Re: ${opened.subject}`,
+      bodyHtml: quoteHtml(original),
+      replyToId: original.id,
+    })
+  }
+
   const forward = () =>
-    setCompose({
+    openCompose({
       accountId: opened.account_id,
       to: '',
       subject: opened.subject.startsWith('Fwd:') ? opened.subject : `Fwd: ${opened.subject}`,
-      body: `\n\n---------- Forwarded message ----------\nFrom: ${opened.from_name} <${opened.from_email}>\nDate: ${new Date(opened.received_at).toLocaleString()}\nSubject: ${opened.subject}\n\n${opened.body_text ?? opened.preview}`,
+      bodyHtml: `<br><br><div>---------- Forwarded message ----------</div>${quoteHtml(opened)}`,
     })
 
   const actionBtn =
@@ -221,6 +232,7 @@ export default function EmailBodyView({ emailId }: { emailId: string }) {
           </div>
         </div>
         <div className="flex shrink-0 gap-1.5">
+          <button className={actionBtn} onClick={replyQuoted}>↩ Reply</button>
           <button className={actionBtn} onClick={forward}>↪ Forward</button>
           <button className={actionBtn} onClick={() => patch({ folder_role: 'archive' }, 'Archived')}>
             🗄
@@ -287,10 +299,6 @@ export default function EmailBodyView({ emailId }: { emailId: string }) {
             {sending ? '…' : 'Send ▶'}
           </button>
         </div>
-      )}
-
-      {compose && (
-        <ComposePanel seed={compose} onClose={() => setCompose(null)} onSent={() => void refreshAll()} />
       )}
     </div>
   )

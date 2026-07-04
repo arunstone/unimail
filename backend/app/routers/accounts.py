@@ -20,9 +20,9 @@ from ..models import (
     SyncLog,
     User,
 )
-from ..schemas import AccountOut, ImapAccountIn
+from ..schemas import AccountOut, AccountPatchIn, AutoconfigOut, ImapAccountIn
 from ..security import encrypt_secret
-from ..services import oauth, storage
+from ..services import autoconfig, oauth, storage
 from ..services.sync_service import sync_account
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -53,6 +53,32 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
         item.unread_count = unread.get(a.id, 0)
         out.append(item)
     return out
+
+
+@router.get("/autoconfig", response_model=AutoconfigOut)
+async def account_autoconfig(email: str, user: User = Depends(get_current_user)):
+    """Detect IMAP/SMTP settings for an address (Thunderbird-style
+    autoconfig). Blocking DNS/HTTP work runs off the event loop."""
+    if "@" not in email:
+        raise HTTPException(400, "Not an email address")
+    result = await asyncio.to_thread(autoconfig.lookup, email.strip())
+    return AutoconfigOut(**result)
+
+
+@router.patch("/{account_id}", response_model=AccountOut)
+def patch_account(account_id: str, data: AccountPatchIn,
+                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    account = db.get(EmailAccount, account_id)
+    if not account or account.user_id != user.id:
+        raise HTTPException(404, "Account not found")
+    if data.display_name is not None:
+        account.display_name = data.display_name.strip()
+    if data.signature is not None:
+        account.signature = data.signature
+    db.commit()
+    item = AccountOut.model_validate(account)
+    item.unread_count = _unread_counts(db, user.id).get(account.id, 0)
+    return item
 
 
 @router.delete("/{account_id}", status_code=204)

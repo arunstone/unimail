@@ -1,8 +1,12 @@
+import { useState } from 'react'
+import { api } from '../../api/client'
 import { PROVIDER_COLORS } from '../../lib/utils'
 import { useAccountsStore } from '../../stores/accountsStore'
 import { useAuthStore } from '../../stores/authStore'
 import { toast } from '../../stores/toastStore'
 import ProviderIcon from '../common/ProviderIcon'
+import FiltersSection from './FiltersSection'
+import type { Account } from '../../types'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -12,6 +16,78 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </h2>
       <div className="p-4">{children}</div>
     </section>
+  )
+}
+
+function SignatureEditor({ account }: { account: Account }) {
+  const [signature, setSignature] = useState(account.signature ?? '')
+  const [saving, setSaving] = useState(false)
+  const fetchAccounts = useAccountsStore((s) => s.fetchAccounts)
+  const dirty = signature !== (account.signature ?? '')
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.patch(`/api/accounts/${account.id}`, { signature })
+      await fetchAccounts()
+      toast.success('Signature saved')
+    } catch {
+      toast.error('Could not save signature')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <ProviderIcon provider={account.provider} size={16} />
+        <span className="font-mono text-caption text-muted">{account.email_address}</span>
+      </div>
+      <textarea
+        value={signature}
+        onChange={(e) => setSignature(e.target.value)}
+        rows={3}
+        placeholder="Appended to messages you write from this account…"
+        className="input-base resize-y px-3 py-2"
+      />
+      {dirty && (
+        <button className="btn-primary self-end px-3 py-1 text-caption" disabled={saving} onClick={() => void save()}>
+          {saving ? 'Saving…' : 'Save signature'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function NotificationsSection() {
+  const supported = 'Notification' in window
+  const [permission, setPermission] = useState(supported ? Notification.permission : 'denied')
+
+  const enable = async () => {
+    const result = await Notification.requestPermission()
+    setPermission(result)
+    if (result === 'granted') toast.success('Desktop notifications enabled')
+  }
+
+  if (!supported) {
+    return <div className="text-body text-muted">This browser does not support notifications.</div>
+  }
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 text-body text-muted">
+        {permission === 'granted'
+          ? '✓ Enabled — you get a desktop notification when new mail arrives.'
+          : permission === 'denied'
+            ? 'Blocked by the browser. Allow notifications for this site in your browser settings.'
+            : 'Get a desktop notification when new mail arrives.'}
+      </div>
+      {permission === 'default' && (
+        <button className="btn-primary px-3 py-1.5" onClick={() => void enable()}>
+          Enable
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -67,6 +143,24 @@ export default function SettingsView() {
             ))}
           </div>
         )}
+      </Section>
+
+      {accounts.length > 0 && (
+        <Section title="Signatures">
+          <div className="flex flex-col gap-4">
+            {accounts.map((account) => (
+              <SignatureEditor key={account.id} account={account} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <Section title="Notifications">
+        <NotificationsSection />
+      </Section>
+
+      <Section title="Message filters">
+        <FiltersSection />
       </Section>
 
       <Section title="Session">

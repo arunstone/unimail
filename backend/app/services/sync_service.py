@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Attachment, Contact, Email, EmailAccount, Folder, SyncLog
 from ..security import decrypt_secret, encrypt_secret
-from . import imap_service, oauth, storage
+from . import filter_service, imap_service, oauth, storage
 
 logger = logging.getLogger("unimail.sync")
 
@@ -82,6 +82,52 @@ def _upsert_contact(db: Session, user_id: str, account_id: str,
             contact.last_seen_at = seen_at
 
 
+def _push_filter_effects(db: Session, client, account: EmailAccount,
+                         folder_name: str, seen_uids: list[int],
+                         star_uids: list[int],
+                         pending_moves: list[tuple[Email, str]]) -> None:
+    """Mirror filter-rule flags/moves to the server. Failures degrade to
+    local-only changes (flags may then be reverted by the next flag refresh,
+    moves simply stay local like archive does)."""
+    try:
+        client.select_folder(folder_name)  # writable: the fetch was read-only
+        if seen_uids:
+            client.add_flags(seen_uids, [b"\\Seen"])
+        if star_uids:
+            client.add_flags(star_uids, [b"\\Flagged"])
+    except Exception:
+        logger.warning("Could not push filter flags in %s", folder_name, exc_info=True)
+
+    for row, target_role in pending_moves:
+        if target_role == "archive":  # archive folders aren't synced
+            row.folder_role = "archive"
+            continue
+        target = (
+            db.query(Folder)
+            .filter(Folder.account_id == account.id, Folder.role == target_role)
+            .first()
+        )
+        if target is None or target.name == folder_name:
+            row.folder_role = target_role  # no such server folder: local-only
+            continue
+        try:
+            try:
+                client.move([row.imap_uid], target.name)
+            except Exception:  # server without MOVE capability
+                client.copy([row.imap_uid], target.name)
+                client.add_flags([row.imap_uid], [b"\\Deleted"])
+                client.expunge()
+            # UID in the target folder is unknown; the next sync reclaims
+            # this row there by Message-ID
+            row.folder_name = target.name
+            row.folder_role = target_role
+            row.imap_uid = None
+        except Exception:
+            logger.warning("Filter move to %s failed; keeping local move",
+                           target_role, exc_info=True)
+            row.folder_role = target_role
+
+
 def sync_account(db: Session, account_id: str) -> None:
     account = db.get(EmailAccount, account_id)
     if not account or not account.is_active:
@@ -92,6 +138,7 @@ def sync_account(db: Session, account_id: str) -> None:
     account.sync_status = "syncing"
     db.commit()
 
+    rules = filter_service.load_rules(db, account.user_id)
     new_count = 0
     try:
         client = connect_account(db, account)
@@ -124,6 +171,12 @@ def sync_account(db: Session, account_id: str) -> None:
                         client, folder_name, 0
                     )
                 folder.uidvalidity = uidvalidity
+
+                # filter effects collected while inserting, mirrored to the
+                # server after the loop (the fetch selected read-only)
+                seen_uids: list[int] = []
+                star_uids: list[int] = []
+                pending_moves: list[tuple[Email, str]] = []
 
                 for parsed in messages:
                     exists = (
@@ -203,6 +256,20 @@ def sync_account(db: Session, account_id: str) -> None:
                         _upsert_contact(db, account.user_id, account.id,
                                         addr["name"], addr["email"], parsed.received_at)
                     new_count += 1
+
+                    # user filter rules on fresh inbox mail
+                    if rules and role == "inbox":
+                        move_to = filter_service.apply_local_actions(db, row, rules)
+                        if row.is_read and not parsed.is_read:
+                            seen_uids.append(parsed.imap_uid)
+                        if row.is_starred and not parsed.is_starred:
+                            star_uids.append(parsed.imap_uid)
+                        if move_to:
+                            pending_moves.append((row, move_to))
+
+                if seen_uids or star_uids or pending_moves:
+                    _push_filter_effects(db, client, account, folder_name,
+                                         seen_uids, star_uids, pending_moves)
 
                 folder.last_seen_uid = max_uid
                 db.commit()

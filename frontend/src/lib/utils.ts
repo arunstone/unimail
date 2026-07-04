@@ -78,3 +78,31 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
+
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+export function textToHtml(s: string): string {
+  return escapeHtml(s).replace(/\n/g, '<br>')
+}
+
+/** Thunderbird-style quoted original for replies/forwards. */
+export function quoteHtml(m: {
+  from_name: string
+  from_email: string
+  received_at: string
+  body_text: string | null
+  body_html: string | null
+  preview: string
+}): string {
+  const header = `On ${new Date(m.received_at).toLocaleString()}, ${
+    m.from_name || m.from_email
+  } <${m.from_email}> wrote:`
+  const inner = m.body_html ?? textToHtml(m.body_text ?? m.preview ?? '')
+  return `<br><br><div>${escapeHtml(header)}</div><blockquote style="border-left:2px solid #5b8cff;margin:4px 0 0;padding-left:10px;color:#8a90ad">${inner}</blockquote>`
+}
