@@ -20,9 +20,9 @@
 - [x] 9. Shared primitives — src/components/common/ui.tsx (Button/Input/Card/Wordmark) + .btn-primary/.btn-outline/.input-base/.card recipes in index.css; adopted in auth pages, AddAccountModal, ComposePanel, WorkspacePanel, EmailBodyView
 
 ## Security hardening (server-wide, added 2026-06-12 session 4)
-- [x] Portainer brute-force protection (2026-07-04) — strict rate limit on its login endpoint (`location = /api/auth`, 10 req/min per IP). NOTE: full nginx basic-auth is NOT possible — Portainer's UI sends `Authorization: Bearer` which basic-auth would reject, breaking the app. Remaining user task: make sure the Portainer admin password itself is strong.
+- [x] Portainer brute-force protection (2026-07-04) — strict rate limit on its login endpoint (`location = /api/auth`, 10 req/min per IP). NOTE: full nginx basic-auth is NOT possible — Portainer's UI sends `Authorization: Bearer` which basic-auth would reject, breaking the app. Admin password confirmed strong by user 2026-07-04 → item closed.
 - [x] nginx rate limiting (2026-07-04) — `/opt/nginx/conf.d/00-ratelimit.conf` defines 3 zones: `auth` 10r/min (Unimail /api/auth/ + Portainer login), `api` 10r/s burst 20 (Unimail + Pillar Square APIs), `general` 30r/s burst 50 (all sites incl. n8n, Open WebUI, msf-bot). Returns 429. Tested live: 7th rapid login attempt → 429.
-- [ ] Put Cloudflare (free tier) in front of both domains — DDoS protection + hides the server's real IP (USER task: change nameservers at Namecheap to Cloudflare's)
+- [x] Cloudflare in front of example.com (2026-07-04) — free plan, nameservers danica/keenan.ns.cloudflare.com; @/www/portainer/wa proxied (real IP hidden), `mail` DNS-only (email untouched, 10/10 intact), Universal SSL issued, all sites verified 200 via CF edge. `ollama` subdomain dropped: Open WebUI decommissioned same day (nginx block removed, container stopped + restart=no; ollama container stays internal for Unimail embeddings). Optional later: repeat for example.com. Found during checks: msf-bot container doesn't exist → wa. 502s (pre-existing, unrelated).
 - Skipped by user decision: SSH key hardening / disabling root password login
 
 ## Built & deployed 2026-06-12 session 5 (smoke-tested: register/login, labels CRUD, search+file_type, graph, forgot-password 202, ollama embed OK from backend)
