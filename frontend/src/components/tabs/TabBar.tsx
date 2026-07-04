@@ -13,19 +13,9 @@ function TabIcon({ tab }: { tab: Tab }) {
   return <span className="text-[13px]">📁</span>
 }
 
-let homeTabSeq = 1
-
 export default function TabBar() {
-  const { tabs, activeTabId, focusTab, closeTab, reorderTabs, openTab } = useTabsStore()
+  const { tabs, activeTabId, focusTab, closeTab, reorderTabs } = useTabsStore()
   const dragIndex = useRef<number | null>(null)
-
-  const newHomeTab = () =>
-    openTab({
-      kind: 'home',
-      key: `home-${homeTabSeq++}`,
-      title: 'Home',
-      location: { view: 'home' },
-    })
 
   return (
     <div className="flex h-10 items-end gap-1 overflow-x-auto bg-tabbar px-2 pt-1.5">
@@ -53,7 +43,7 @@ export default function TabBar() {
           >
             <TabIcon tab={tab} />
             <span className="min-w-0 truncate">{truncate(tab.title, 30)}</span>
-            {tab.kind !== 'home' && (
+            {tab.id !== 'tab-home' && (
               <button
                 onClick={(e) => {
                   e.stopPropagation()
@@ -67,13 +57,6 @@ export default function TabBar() {
           </div>
         )
       })}
-      <button
-        onClick={newHomeTab}
-        title="New tab"
-        className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center self-center rounded text-subhead text-muted transition-colors hover:bg-surface hover:text-primary"
-      >
-        +
-      </button>
     </div>
   )
 }

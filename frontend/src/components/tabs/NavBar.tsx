@@ -116,7 +116,7 @@ export default function NavBar() {
       <div className="ml-2 flex min-w-0 flex-1 items-center gap-1.5 font-mono text-caption text-muted">
         {crumbs.map((c, i) => (
           <span key={i} className="flex min-w-0 items-center gap-1.5">
-            {i > 0 && <span className="text-divider">›</span>}
+            {i > 0 && <span className="text-muted">›</span>}
             {c.loc ? (
               <button
                 onClick={() => navigate(c.loc!)}

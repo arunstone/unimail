@@ -1,5 +1,9 @@
 # Unimail Checklist
 
+## To build — customer-experience test findings (user narrated 2026-07-04, NOT yet approved to build)
+- [x] **Breadcrumb separator invisible** (FIXED 2026-07-04) — NavBar.tsx does render a `›` between crumbs, but it's styled `text-divider` (same color as hairline borders) so it's effectively invisible; user reads it as "missing >". Fix: give the separator a visible color (e.g. text-muted). Also note single-crumb views (Home, Settings, account folders) legitimately show no separator.
+- [x] **Duplicate Home tabs can't be closed** (FIXED 2026-07-04: × by id, + button removed) — the `+` (new tab) button in TabBar.tsx opens ANOTHER tab with kind 'home' (key home-1, home-2…); the × close button is hidden for every `kind === 'home'` tab, while the store only protects the one real `tab-home` id — so extra Home tabs are uncloseable zombies. User expectation: ONE static/pinned Home tab; content opens in new tabs. Fix: hide × only for `id === 'tab-home'` (extra tabs become closable) AND rethink `+` — either remove it or make it focus Home instead of duplicating it.
+
 ## Misimplementations — ALL FIXED & DEPLOYED 2026-07-04 (found in same-day full backend review)
 - [x] 1. **Read/star changes revert within 5 min** — new services/imap_actions.py `push_flags` mirrors is_read/is_starred to IMAP (STORE \Seen/\Flagged) as a background task from patch_email. VERIFIED live: PATCH → doveadm shows \Seen \Flagged on server; manual sync no longer reverts.
 - [x] 2. **Delete/move to trash was local-only** — `push_move` does IMAP MOVE (COPY+\Deleted+EXPUNGE fallback) to the account folder with the target role; UID detached, next sync reclaims it by Message-ID. VERIFIED live: PATCH folder_role=trash → message left server INBOX, appeared in server Trash, row reclaimed uid after sync. Archive stays local-only (server archive folders aren't synced — SKIP_FOLDERS).
