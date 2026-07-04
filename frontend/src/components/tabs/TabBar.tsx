@@ -49,7 +49,7 @@ export default function TabBar() {
                   e.stopPropagation()
                   closeTab(tab.id)
                 }}
-                className="ml-auto rounded px-1 text-muted transition-opacity hover:bg-divider hover:text-primary lg:opacity-0 lg:group-hover:opacity-100"
+                className="ml-auto rounded px-1 text-muted transition-colors hover:bg-divider hover:text-primary"
               >
                 ×
               </button>
