@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import AuthShell, { AuthError } from '../components/common/AuthShell'
+import OAuthButtons from '../components/common/OAuthButtons'
 import { Button, Input } from '../components/common/ui'
 
 export default function Register() {
@@ -57,6 +58,7 @@ export default function Register() {
 
   return (
     <AuthShell tagline="Start unifying your inboxes">
+      <OAuthButtons />
       <form onSubmit={submit}>
         {error && <AuthError>{error}</AuthError>}
         <div className="space-y-3">

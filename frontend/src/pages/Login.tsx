@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { api, ApiError } from '../api/client'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { api, ApiError, setToken } from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import AuthShell, { AuthError } from '../components/common/AuthShell'
+import OAuthButtons from '../components/common/OAuthButtons'
 import { Button, Input } from '../components/common/ui'
 
 export default function Login() {
@@ -13,7 +14,23 @@ export default function Login() {
   const [unverified, setUnverified] = useState(false)
   const [resent, setResent] = useState(false)
   const login = useAuthStore((s) => s.login)
+  const loadMe = useAuthStore((s) => s.loadMe)
   const nav = useNavigate()
+  const [params, setParams] = useSearchParams()
+
+  // "Sign in with Google/Microsoft" lands back here with a session token
+  useEffect(() => {
+    const oauthToken = params.get('oauth_token')
+    const oauthError = params.get('oauth_error')
+    if (oauthToken) {
+      setToken(oauthToken)
+      void loadMe()
+      nav('/', { replace: true })
+    } else if (oauthError) {
+      setError(`Sign-in failed (${oauthError.split('_').join(' ')}) — try again`)
+      setParams({}, { replace: true })
+    }
+  }, [params, setParams, loadMe, nav])
 
   const resend = async () => {
     try {
@@ -43,6 +60,7 @@ export default function Login() {
 
   return (
     <AuthShell tagline="All your email in one place">
+      <OAuthButtons />
       <form onSubmit={submit}>
         {error && (
           <AuthError>

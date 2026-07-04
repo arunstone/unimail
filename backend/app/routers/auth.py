@@ -1,18 +1,20 @@
+import asyncio
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import User
+from ..models import EmailAccount, User
 from ..schemas import LoginIn, RegisterIn, TokenOut, UserOut
-from ..security import create_access_token, hash_password, verify_password
-from ..services import system_mail
+from ..security import create_access_token, encrypt_secret, hash_password, verify_password
+from ..services import oauth, system_mail
 
 logger = logging.getLogger("unimail.auth")
 
@@ -137,3 +139,103 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     return user
+
+
+# ---- Sign in with Google / Microsoft ----
+# One consent = app login (account created from the provider identity, no
+# password) + the mailbox connected in the same step, Notion-Mail-style.
+
+
+@router.get("/oauth-providers")
+def oauth_providers():
+    """Which sign-in buttons the login page should show (a provider is
+    available once its client id/secret are set in .env)."""
+    return {p: bool(cfg["client_id"]()) for p, cfg in oauth.PROVIDERS.items()}
+
+
+@router.get("/oauth/{provider}/start")
+def oauth_login_start(provider: str):
+    if provider not in oauth.PROVIDERS:
+        raise HTTPException(400, "Unsupported sign-in provider")
+    if not oauth.PROVIDERS[provider]["client_id"]():
+        raise HTTPException(
+            501, f"Sign in with {provider} is not configured (missing client id/secret in .env)"
+        )
+    return RedirectResponse(oauth.build_consent_url(provider, "", login=True))
+
+
+@router.get("/oauth/{provider}/callback")
+async def oauth_login_callback(
+    provider: str,
+    background: BackgroundTasks,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: Session = Depends(get_db),
+):
+    fail = f"{settings.frontend_origin}/login?oauth_error="
+    if provider not in oauth.PROVIDERS:
+        return RedirectResponse(f"{fail}bad_provider")
+    if error or not code or not state:
+        return RedirectResponse(f"{fail}{error or 'missing_code'}")
+    payload = oauth.read_state(state, purpose="oauth_login")
+    if not payload or payload.get("provider") != provider:
+        return RedirectResponse(f"{fail}bad_state")
+
+    try:
+        tokens = await asyncio.to_thread(oauth.exchange_code, provider, code, True)
+        email, name = await asyncio.to_thread(oauth.fetch_identity, provider, tokens)
+    except Exception:
+        logger.exception("OAuth login token exchange failed (%s)", provider)
+        return RedirectResponse(f"{fail}token_exchange_failed")
+    email = email.lower().strip()
+    if not email:
+        return RedirectResponse(f"{fail}no_email")
+
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        user = User(
+            name=name.strip() or email.partition("@")[0],
+            email=email,
+            # no password — set one later via "Forgot password" if wanted
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            is_verified=True,
+        )
+        db.add(user)
+        db.flush()
+    else:
+        # the provider vouches for this address
+        user.is_verified = True
+
+    # connect (or refresh) the mailbox in the same step
+    cfg = oauth.PROVIDERS[provider]
+    account = (
+        db.query(EmailAccount)
+        .filter(EmailAccount.user_id == user.id, EmailAccount.email_address == email)
+        .first()
+    )
+    if account is None:
+        account = EmailAccount(
+            user_id=user.id,
+            provider=provider,
+            email_address=email,
+            imap_host=cfg["imap_host"],
+            imap_port=993,
+            smtp_host=cfg["smtp_host"],
+            smtp_port=587,
+        )
+        db.add(account)
+    account.access_token_enc = encrypt_secret(tokens["access_token"])
+    if tokens.get("refresh_token"):
+        account.refresh_token_enc = encrypt_secret(tokens["refresh_token"])
+    account.token_expires_at = datetime.now(timezone.utc) + timedelta(
+        seconds=tokens.get("expires_in", 3600)
+    )
+    account.is_active = True
+    db.commit()
+
+    from ..routers.accounts import _first_sync
+
+    background.add_task(_first_sync, account.id)
+    jwt_token = create_access_token(user.id)
+    return RedirectResponse(f"{settings.frontend_origin}/login?oauth_token={jwt_token}")
