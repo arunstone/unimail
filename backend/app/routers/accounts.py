@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -21,7 +22,7 @@ from ..models import (
 )
 from ..schemas import AccountOut, ImapAccountIn
 from ..security import encrypt_secret
-from ..services import oauth
+from ..services import oauth, storage
 from ..services.sync_service import sync_account
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -66,6 +67,11 @@ def disconnect_account(
     # of Email rows just to delete them is slow and label_emails /
     # email_embeddings FKs would abort the whole thing
     email_ids = select(Email.id).where(Email.account_id == account.id)
+    stored_keys = [
+        key for (key,) in db.query(Attachment.storage_key)
+        .filter(Attachment.email_id.in_(email_ids),
+                Attachment.storage_key.isnot(None))
+    ]
     for model, col in ((LabelEmail, LabelEmail.email_id),
                        (EmailEmbedding, EmailEmbedding.email_id),
                        (Attachment, Attachment.email_id)):
@@ -83,6 +89,14 @@ def disconnect_account(
     )
     db.delete(account)
     db.commit()
+    if stored_keys:
+        try:
+            storage.delete_many(stored_keys)
+        except Exception:
+            logging.getLogger("unimail.accounts").warning(
+                "Failed to delete %d stored attachments after disconnect",
+                len(stored_keys), exc_info=True,
+            )
 
 
 def _first_sync(account_id: str) -> None:

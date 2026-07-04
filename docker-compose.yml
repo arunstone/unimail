@@ -26,6 +26,25 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # S3-compatible attachment storage. Internal network only — files are
+  # streamed to clients through the backend, never served directly.
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-unimail}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   # Send-only relay for system mail (verification / password reset).
   # Delivers straight to recipients' mail servers from this VPS — may land
@@ -56,3 +75,4 @@ networks:
 
 volumes:
   pgdata:
+  miniodata:

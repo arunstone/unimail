@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Attachment, Contact, Email, EmailAccount, Folder, SyncLog
 from ..security import decrypt_secret, encrypt_secret
-from . import imap_service, oauth
+from . import imap_service, oauth, storage
 
 logger = logging.getLogger("unimail.sync")
 
@@ -182,7 +182,20 @@ def sync_account(db: Session, account_id: str) -> None:
                     db.add(row)
                     db.flush()
                     for att in parsed.attachments:
-                        db.add(Attachment(email_id=row.id, **att))
+                        content = att.pop("content", b"")
+                        att_row = Attachment(email_id=row.id, **att)
+                        db.add(att_row)
+                        if content and storage.enabled():
+                            db.flush()  # assigns att_row.id
+                            try:
+                                storage.put(att_row.id, content, att_row.content_type)
+                                att_row.storage_key = att_row.id
+                            except Exception:
+                                # storage_key stays NULL → IMAP fallback on download
+                                logger.warning(
+                                    "Attachment upload to storage failed (id=%s)",
+                                    att_row.id, exc_info=True,
+                                )
                     # contacts from To/From/Cc
                     _upsert_contact(db, account.user_id, account.id,
                                     parsed.from_name, parsed.from_email, parsed.received_at)

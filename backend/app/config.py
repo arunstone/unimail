@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     verify_token_expire_hours: int = 48
     reset_token_expire_hours: int = 2
 
+    # S3-compatible attachment storage (MinIO). Leave S3_ENDPOINT empty to
+    # disable — downloads then fall back to on-demand IMAP fetches.
+    s3_endpoint: str = ""
+    s3_bucket: str = "unimail-attachments"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "us-east-1"
+
     # Ollama for graph embeddings (falls back to TF-IDF when unreachable)
     ollama_url: str = "http://ollama:11434"
     embedding_model: str = "nomic-embed-text"

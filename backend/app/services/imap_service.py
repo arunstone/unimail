@@ -114,6 +114,7 @@ def parse_message(uid: int, raw: bytes, flags: tuple) -> ParsedEmail:
                 "filename": part.get_filename() or "attachment",
                 "content_type": ctype,
                 "size_bytes": len(payload),
+                "content": payload,  # popped by sync before the DB insert
             })
         elif ctype == "text/plain" and body_text is None:
             body_text = part.get_content()

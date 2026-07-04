@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from datetime import datetime, timezone
 
@@ -6,6 +7,7 @@ from urllib.parse import quote
 
 import bleach
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -22,9 +24,11 @@ from ..schemas import (
     SummaryOut,
     ThreadMessageOut,
 )
-from ..services import imap_actions, imap_service
+from ..services import imap_actions, imap_service, storage
 from ..services.smtp_service import send_email
 from ..services.sync_service import connect_account
+
+logger = logging.getLogger("unimail.emails")
 
 router = APIRouter(prefix="/api/emails", tags=["emails"])
 
@@ -303,6 +307,22 @@ def download_attachment(email_id: str, attachment_id: str,
     att = db.get(Attachment, attachment_id)
     if not att or att.email_id != row.id:
         raise HTTPException(404, "Attachment not found")
+
+    disposition = f"attachment; filename*=UTF-8''{quote(att.filename)}"
+
+    if att.storage_key and storage.enabled():
+        try:
+            body, size = storage.get(att.storage_key)
+            return StreamingResponse(
+                body.iter_chunks(),
+                media_type=att.content_type or "application/octet-stream",
+                headers={"Content-Disposition": disposition,
+                         "Content-Length": str(size)},
+            )
+        except Exception:
+            logger.warning("Stored attachment %s unreadable, falling back to IMAP",
+                           att.id, exc_info=True)
+
     if not row.imap_uid or not row.folder_name:
         raise HTTPException(404, "Attachment content is not available for this email")
 
@@ -325,13 +345,21 @@ def download_attachment(email_id: str, attachment_id: str,
     if content is None:
         raise HTTPException(404, "Attachment no longer exists on the mail server")
 
+    # backfill storage so the next download skips IMAP (rows from before the
+    # storage layer existed have storage_key NULL)
+    if storage.enabled():
+        try:
+            storage.put(att.id, content, att.content_type)
+            att.storage_key = att.id
+            db.commit()
+        except Exception:
+            logger.warning("Storage backfill failed for attachment %s",
+                           att.id, exc_info=True)
+
     return Response(
         content=content,
         media_type=att.content_type or "application/octet-stream",
-        headers={
-            "Content-Disposition":
-                f"attachment; filename*=UTF-8''{quote(att.filename)}",
-        },
+        headers={"Content-Disposition": disposition},
     )
 
 

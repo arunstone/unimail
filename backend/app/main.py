@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .database import Base, engine
 from .routers import accounts, auth, contacts, emails, graph, labels, sync
+from .services import storage
 from .services.sync_service import sync_all_accounts
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +24,13 @@ async def _sync_job() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    try:
+        storage.ensure_bucket()
+    except Exception:
+        logging.getLogger("unimail").warning(
+            "Attachment storage unreachable at startup; downloads fall back to IMAP",
+            exc_info=True,
+        )
     scheduler.add_job(
         _sync_job,
         "interval",

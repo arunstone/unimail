@@ -155,8 +155,10 @@ class Attachment(Base):
     filename: Mapped[str] = mapped_column(String(512))
     content_type: Mapped[str] = mapped_column(String(255), default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
-    # attachment content is fetched on demand from IMAP; we store metadata only
+    # attachment content lives in S3-compatible storage under storage_key
+    # (uploaded during sync); IMAP re-fetch is the fallback when NULL
     imap_part: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    storage_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     email: Mapped["Email"] = relationship(back_populates="attachments")
 
