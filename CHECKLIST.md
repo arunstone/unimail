@@ -49,7 +49,7 @@
 - [x] Let's Encrypt cert for mail.example.com issued 2026-07-02 (expires 2026-09-30, auto-renews); compose swapped to SSL_TYPE=letsencrypt; renew cron got --deploy-hook "docker restart mailserver"; IMAPS/SMTPS verified serving LE cert, IMAP login OK
 - [x] arun@example.com added to Unimail (IMAP) — verified 2026-07-02: account row sync_status=ok, 5-min scheduler pulling INBOX
 - [x] Receive test PASSED 2026-07-02: Gmail → arun@example.com delivered (TLS 1.3, amavis Passed CLEAN, stored in INBOX, synced into Unimail). Inbound 25 open after your VPS provider panel firewall rules added (25/465/587/993/2222 — panel default only allowed 22/80/443)
-- [ ] Send test scored on mail-tester.com — BLOCKED on user: the test address is generated in-browser; open mail-tester.com, copy the test-xxxx@ address, give it to Claude
+- [x] Send test scored on mail-tester.com 2026-07-04: **10/10** — SPF pass, DKIM valid, TLS 1.3, no blacklists (sent through Unimail's send API, so the full app path is proven too)
 - [x] Harden: smtpd_tls_auth_only=yes (2026-07-04) — via docker-data/dms/config/postfix-main.cf override. GOTCHA: docker-mailserver only applies overrides on container re-CREATION (`docker compose up -d --force-recreate`), not restart. Verified: port 587 no longer advertises AUTH before STARTTLS.
 - [x] System email VERIFIED WORKING end-to-end (2026-07-04): forgot-password → self-hosted relay → Gmail accepted 250 OK (SPF record did the trick). May land in spam (relay has no DKIM) — acceptable for backup.
 
