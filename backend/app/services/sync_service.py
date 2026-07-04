@@ -64,6 +64,9 @@ def _upsert_contact(db: Session, user_id: str, account_id: str,
         contact = Contact(user_id=user_id, email=address, name=name or "",
                           account_ids=json.dumps([account_id]))
         db.add(contact)
+        # autoflush is off: flush so a later upsert for the same address in
+        # this message finds this row instead of inserting a duplicate
+        db.flush()
     else:
         ids = set(json.loads(contact.account_ids or "[]"))
         ids.add(account_id)
