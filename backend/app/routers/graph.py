@@ -15,6 +15,7 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..models import Email, EmailAccount, User
 from ..services import embeddings as emb_service
+from .emails import _like
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
 
@@ -72,13 +73,13 @@ def email_graph(
     if account_id:
         q = q.filter(Email.account_id == account_id)
     if search:
-        like = f"%{search}%"
+        like = _like(search)
         q = q.filter(
             or_(
-                Email.subject.ilike(like),
-                Email.body_text.ilike(like),
-                Email.from_email.ilike(like),
-                Email.from_name.ilike(like),
+                Email.subject.ilike(like, escape="\\"),
+                Email.body_text.ilike(like, escape="\\"),
+                Email.from_email.ilike(like, escape="\\"),
+                Email.from_name.ilike(like, escape="\\"),
             )
         )
     rows = q.order_by(Email.received_at.desc()).limit(limit).all()

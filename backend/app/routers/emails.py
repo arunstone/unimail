@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 import bleach
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -22,7 +22,7 @@ from ..schemas import (
     SummaryOut,
     ThreadMessageOut,
 )
-from ..services import imap_service
+from ..services import imap_actions, imap_service
 from ..services.smtp_service import send_email
 from ..services.sync_service import connect_account
 
@@ -40,6 +40,19 @@ ALLOWED_ATTRS = {
     "img": ["src", "alt", "width", "height"],
     "*": ["style", "align", "valign", "width", "height", "color", "bgcolor"],
 }
+
+
+def _like(term: str) -> str:
+    """Contains-pattern with LIKE wildcards in the user's text escaped."""
+    escaped = term.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+    return f"%{escaped}%"
+
+
+def _recipient_pattern(address: str) -> str:
+    """Match an exact address inside a stored JSON recipient list, instead of
+    a bare substring (which would also hit jimbob@x.com for bob@x.com)."""
+    escaped = address.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+    return f'%"email": "{escaped}"%'
 
 
 def _own_email(db: Session, user: User, email_id: str) -> Email:
@@ -95,14 +108,14 @@ def list_emails(
     else:
         q = q.filter(Email.folder_role == folder)
     if search:
-        like = f"%{search}%"
+        like = _like(search)
         q = q.filter(
             or_(
-                Email.subject.ilike(like),
-                Email.body_text.ilike(like),
-                Email.preview.ilike(like),
-                Email.from_email.ilike(like),
-                Email.from_name.ilike(like),
+                Email.subject.ilike(like, escape="\\"),
+                Email.body_text.ilike(like, escape="\\"),
+                Email.preview.ilike(like, escape="\\"),
+                Email.from_email.ilike(like, escape="\\"),
+                Email.from_name.ilike(like, escape="\\"),
             )
         )
     if file_type:
@@ -223,12 +236,12 @@ def email_thread(
         )
         q = q.filter(norm == core)
     if counterpart:
-        like = f"%{counterpart}%"
+        like = _recipient_pattern(counterpart)
         q = q.filter(
             or_(
                 func.lower(Email.from_email) == counterpart,
-                Email.to_recipients.ilike(like),
-                Email.cc_recipients.ilike(like),
+                Email.to_recipients.ilike(like, escape="\\"),
+                Email.cc_recipients.ilike(like, escape="\\"),
             )
         )
     if not core and not counterpart:
@@ -323,25 +336,37 @@ def download_attachment(email_id: str, attachment_id: str,
 
 
 @router.patch("/{email_id}", response_model=EmailRowOut)
-def patch_email(email_id: str, data: EmailPatchIn,
+def patch_email(email_id: str, data: EmailPatchIn, background: BackgroundTasks,
                 user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     row = _own_email(db, user, email_id)
-    if data.is_read is not None:
+    flags_changed = False
+    moved_to = None
+    if data.is_read is not None and data.is_read != row.is_read:
         row.is_read = data.is_read
-    if data.is_starred is not None:
+        flags_changed = True
+    if data.is_starred is not None and data.is_starred != row.is_starred:
         row.is_starred = data.is_starred
+        flags_changed = True
     if data.folder_role is not None:
         if data.folder_role not in FOLDERS + ["archive"]:
             raise HTTPException(400, "Invalid folder")
-        row.folder_role = data.folder_role
+        if data.folder_role != row.folder_role:
+            row.folder_role = data.folder_role
+            moved_to = data.folder_role
     db.commit()
     db.refresh(row)
+    # mirror the change on the mail server so the next sync doesn't revert
+    # it (flags first: the move detaches the row's UID)
+    if flags_changed:
+        background.add_task(imap_actions.push_flags, row.id)
+    if moved_to:
+        background.add_task(imap_actions.push_move, row.id, moved_to)
     return row
 
 
 @router.post("/send", status_code=202)
-def send(data: SendEmailIn, user: User = Depends(get_current_user),
-         db: Session = Depends(get_db)):
+def send(data: SendEmailIn, background: BackgroundTasks,
+         user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     account = db.get(EmailAccount, data.account_id)
     if not account or account.user_id != user.id:
         raise HTTPException(404, "Account not found")
@@ -378,4 +403,9 @@ def send(data: SendEmailIn, user: User = Depends(get_current_user),
     )
     db.add(sent_row)
     db.commit()
+    # plain-IMAP servers don't store a Sent copy on SMTP send; APPEND one so
+    # other clients see it too. Gmail/Outlook/Yahoo store their own copy,
+    # which sync reclaims into sent_row by Message-ID (no duplicate).
+    if account.provider == "imap":
+        background.add_task(imap_actions.push_sent_copy, sent_row.id, msg.as_bytes())
     return {"status": "sent", "email_id": sent_row.id}

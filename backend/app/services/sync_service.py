@@ -108,7 +108,13 @@ def sync_account(db: Session, account_id: str) -> None:
                     client, folder_name, folder.last_seen_uid
                 )
                 if uidvalidity and folder.uidvalidity and uidvalidity != folder.uidvalidity:
-                    # mailbox was rebuilt server-side; UIDs are no longer comparable
+                    # mailbox was rebuilt server-side; UIDs are no longer
+                    # comparable — detach them so the refetch below reclaims
+                    # rows by Message-ID instead of colliding on stale UIDs
+                    db.query(Email).filter(
+                        Email.account_id == account.id,
+                        Email.folder_name == folder_name,
+                    ).update({Email.imap_uid: None}, synchronize_session=False)
                     folder.last_seen_uid = 0
                     db.commit()
                     messages, max_uid, uidvalidity = imap_service.fetch_new_messages(
@@ -128,6 +134,28 @@ def sync_account(db: Session, account_id: str) -> None:
                     )
                     if exists:
                         continue
+                    # reclaim rows whose server location we lost or never had:
+                    # locally-stored sent mail, moved messages, UIDVALIDITY
+                    # resets — all keyed by Message-ID with a detached UID
+                    if parsed.message_id:
+                        reclaim = (
+                            db.query(Email)
+                            .filter(
+                                Email.account_id == account.id,
+                                Email.message_id == parsed.message_id,
+                                Email.imap_uid.is_(None),
+                            )
+                            .first()
+                        )
+                        if reclaim is not None:
+                            reclaim.folder_name = folder_name
+                            reclaim.folder_role = role
+                            reclaim.imap_uid = parsed.imap_uid
+                            reclaim.is_read = parsed.is_read
+                            reclaim.is_starred = parsed.is_starred
+                            if not reclaim.body_html and parsed.body_html:
+                                reclaim.body_html = parsed.body_html
+                            continue
                     row = Email(
                         account_id=account.id,
                         folder_role=role,

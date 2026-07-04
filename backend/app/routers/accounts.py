@@ -3,13 +3,22 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import RedirectResponse
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import SessionLocal, get_db
 from ..deps import get_current_user
-from ..models import Email, EmailAccount, User
+from ..models import (
+    Attachment,
+    Email,
+    EmailAccount,
+    EmailEmbedding,
+    Folder,
+    LabelEmail,
+    SyncLog,
+    User,
+)
 from ..schemas import AccountOut, ImapAccountIn
 from ..security import encrypt_secret
 from ..services import oauth
@@ -52,6 +61,26 @@ def disconnect_account(
     account = db.get(EmailAccount, account_id)
     if not account or account.user_id != user.id:
         raise HTTPException(404, "Account not found")
+    # bulk-delete children the ORM cascade doesn't know about (label links,
+    # embedding cache, sync log) and the rest by query — loading thousands
+    # of Email rows just to delete them is slow and label_emails /
+    # email_embeddings FKs would abort the whole thing
+    email_ids = select(Email.id).where(Email.account_id == account.id)
+    for model, col in ((LabelEmail, LabelEmail.email_id),
+                       (EmailEmbedding, EmailEmbedding.email_id),
+                       (Attachment, Attachment.email_id)):
+        db.query(model).filter(col.in_(email_ids)).delete(
+            synchronize_session=False
+        )
+    db.query(Email).filter(Email.account_id == account.id).delete(
+        synchronize_session=False
+    )
+    db.query(Folder).filter(Folder.account_id == account.id).delete(
+        synchronize_session=False
+    )
+    db.query(SyncLog).filter(SyncLog.account_id == account.id).delete(
+        synchronize_session=False
+    )
     db.delete(account)
     db.commit()
 

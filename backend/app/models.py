@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -98,8 +99,8 @@ class Folder(Base):
     name: Mapped[str] = mapped_column(String(255))  # provider's raw folder name
     # normalised role: inbox|sent|drafts|starred|spam|trash|custom
     role: Mapped[str] = mapped_column(String(20), default="custom")
-    uidvalidity: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    last_seen_uid: Mapped[int] = mapped_column(Integer, default=0)
+    uidvalidity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    last_seen_uid: Mapped[int] = mapped_column(BigInteger, default=0)
 
     account: Mapped["EmailAccount"] = relationship(back_populates="folders")
 
@@ -113,7 +114,7 @@ class Email(Base):
     account_id: Mapped[str] = mapped_column(ForeignKey("email_accounts.id"), index=True)
     folder_role: Mapped[str] = mapped_column(String(20), index=True)  # normalised folder
     folder_name: Mapped[str] = mapped_column(String(255), default="")
-    imap_uid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    imap_uid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     message_id: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
 
     from_name: Mapped[str] = mapped_column(String(255), default="")

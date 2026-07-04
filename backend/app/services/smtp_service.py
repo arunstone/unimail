@@ -34,13 +34,23 @@ def send_email(db: Session, account: EmailAccount, to: list[str], cc: list[str],
         raise RuntimeError("No SMTP host configured for this account")
 
     token = _ensure_access_token(db, account)
-    with smtplib.SMTP(host, port, timeout=30) as smtp:
+    # 465 = implicit TLS from the first byte; everything else = STARTTLS
+    if port == 465:
+        smtp_conn = smtplib.SMTP_SSL(host, port, timeout=30)
+    else:
+        smtp_conn = smtplib.SMTP(host, port, timeout=30)
+    with smtp_conn as smtp:
         smtp.ehlo()
-        smtp.starttls()
-        smtp.ehlo()
+        if port != 465:
+            smtp.starttls()
+            smtp.ehlo()
         if token:
             auth = f"user={account.email_address}\x01auth=Bearer {token}\x01\x01"
-            smtp.docmd("AUTH", "XOAUTH2 " + base64.b64encode(auth.encode()).decode())
+            code, resp = smtp.docmd(
+                "AUTH", "XOAUTH2 " + base64.b64encode(auth.encode()).decode()
+            )
+            if code != 235:
+                raise RuntimeError(f"XOAUTH2 authentication failed: {code} {resp!r}")
         else:
             smtp.login(account.imap_username or account.email_address,
                        decrypt_secret(account.imap_password_enc))

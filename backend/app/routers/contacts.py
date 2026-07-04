@@ -8,6 +8,7 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..models import Contact, Email, EmailAccount, User
 from ..schemas import ContactOut, EmailRowOut
+from .emails import _like, _recipient_pattern
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
 
@@ -31,8 +32,9 @@ def list_contacts(
 ):
     q = db.query(Contact).filter(Contact.user_id == user.id)
     if search:
-        like = f"%{search}%"
-        q = q.filter(or_(Contact.name.ilike(like), Contact.email.ilike(like)))
+        like = _like(search)
+        q = q.filter(or_(Contact.name.ilike(like, escape="\\"),
+                         Contact.email.ilike(like, escape="\\")))
     if account_id:
         q = q.filter(Contact.account_ids.contains(account_id))
     return [
@@ -67,6 +69,7 @@ def contact_emails(
         raise HTTPException(404, "Contact not found")
 
     address = contact.email
+    like = _recipient_pattern(address)
     q = (
         db.query(Email)
         .join(EmailAccount)
@@ -74,8 +77,8 @@ def contact_emails(
         .filter(
             or_(
                 Email.from_email == address,
-                Email.to_recipients.contains(address),
-                Email.cc_recipients.contains(address),
+                Email.to_recipients.ilike(like, escape="\\"),
+                Email.cc_recipients.ilike(like, escape="\\"),
             )
         )
     )
