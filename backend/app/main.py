@@ -21,6 +21,7 @@ from .routers import (
     graph,
     junk,
     labels,
+    searches,
     sync,
 )
 from .services import storage
@@ -116,6 +117,7 @@ app.include_router(drafts.router)
 app.include_router(filters.router)
 app.include_router(junk.router)
 app.include_router(calendar.router)
+app.include_router(searches.router)
 
 
 @app.get("/api/health")

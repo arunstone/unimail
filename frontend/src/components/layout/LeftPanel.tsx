@@ -3,17 +3,20 @@ import { PROVIDER_COLORS } from '../../lib/utils'
 import { useAccountsStore } from '../../stores/accountsStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useLabelsStore } from '../../stores/labelsStore'
+import { useSearchesStore } from '../../stores/searchesStore'
 import { useTabsStore } from '../../stores/tabsStore'
 import { useUiStore } from '../../stores/uiStore'
 import { toast } from '../../stores/toastStore'
 import ProviderIcon from '../common/ProviderIcon'
 import { Wordmark } from '../common/ui'
 import AddAccountModal from './AddAccountModal'
+import type { FileType } from '../../types'
 
 export default function LeftPanel() {
   const { accounts } = useAccountsStore()
   const { labels, openWorkspace } = useLabelsStore()
-  const { openTab, activeTab } = useTabsStore()
+  const { searches, deleteSearch } = useSearchesStore()
+  const { openTab, activeTab, navigate } = useTabsStore()
   const logout = useAuthStore((s) => s.logout)
   const openCompose = useUiStore((s) => s.openCompose)
   const [showAdd, setShowAdd] = useState(false)
@@ -132,6 +135,48 @@ export default function LeftPanel() {
             </button>
           )
         })}
+
+        {searches.length > 0 && (
+          <div className="mt-3 border-t border-divider pt-2">
+            <div className="px-4 py-1 text-caption font-bold uppercase tracking-widest text-muted">
+              Saved searches
+            </div>
+            {searches.map((saved) => (
+              <div key={saved.id} className="group relative">
+                <button
+                  onClick={() =>
+                    navigate({
+                      view: 'search',
+                      query: saved.query,
+                      fileType: (saved.file_type as FileType | null) ?? undefined,
+                    })
+                  }
+                  className="mx-2 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface"
+                >
+                  🔍
+                  <span className="min-w-0 flex-1 truncate text-body text-primary">
+                    {saved.name}
+                  </span>
+                  <span className="font-mono text-caption text-muted group-hover:opacity-0">
+                    {saved.count > 99 ? '99+' : saved.count}
+                  </span>
+                </button>
+                <button
+                  onClick={() => {
+                    void deleteSearch(saved.id).then(
+                      () => toast.success('Saved search removed'),
+                      () => toast.error('Could not remove saved search'),
+                    )
+                  }}
+                  title="Delete saved search"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 rounded px-1 text-caption text-muted opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {labels.length > 0 && (
           <div className="mt-3 border-t border-divider pt-2">

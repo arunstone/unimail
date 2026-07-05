@@ -7,7 +7,7 @@ Thunderbird has, Unimail doesn't:
 - [x] ★ Rich compose: HTML formatting, drafts, signatures, reply-quoting + attachments (BUILT 2026-07-05)
 - [x] ★ Message filter rules (auto-move/label/mark on sender/subject conditions) (BUILT 2026-07-05)
 - [x] Junk/spam classification in-app (BUILT 2026-07-05 — user said "surprise me"; see "Bayesian junk filter" section below)
-- [ ] Saved searches / virtual folders (gloda faceted search)
+- [x] Saved searches / virtual folders (BUILT 2026-07-06, "surprise me" #3) — `saved_searches` table (name/query/file_type, unique name per user, cap 30) via create_all; /api/searches GET (live counts via build_email_query — the list_emails filter logic extracted into a shared helper)/POST(409 dup)/DELETE; frontend: searchesStore, "SAVED SEARCHES" LeftPanel section (🔍 rows, live count, hover ✕ delete, click → navigate to search view), "☆ Save search" button w/ inline name input in SearchView chip bar ("★ Saved" when current query is already pinned). E2E-verified live (create/409/list-with-count/delete via API, test user removed). Skipped vs TB gloda: no faceted/complex conditions — a saved search is exactly a pinned search query + file-type chip
 - [ ] E2E encryption: OpenPGP + S/MIME (TB `mail/extensions/openpgp|smime`)
 - [x] ★ Standalone address book with manual add/edit/delete (BUILT 2026-07-05; CardDAV sync later)
 - [x] Calendar + tasks — v1 BUILT 2026-07-06 ("surprise me" #2; see "Calendar & tasks" section below). Still missing vs TB: CalDAV sync, recurring-event expansion, RSVP replies, reminders/alarms

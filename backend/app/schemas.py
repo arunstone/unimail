@@ -362,3 +362,21 @@ class TaskOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---- Saved searches ----
+class SavedSearchIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    query: str = Field(min_length=1, max_length=255)
+    file_type: str | None = Field(None, pattern="^(pdf|image|doc|sheet|archive)$")
+
+
+class SavedSearchOut(BaseModel):
+    id: str
+    name: str
+    query: str
+    file_type: str | None
+    count: int = 0
+
+    class Config:
+        from_attributes = True

@@ -272,6 +272,21 @@ class FilterRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class SavedSearch(Base):
+    """A saved search shown as a virtual folder in the left panel."""
+
+    __tablename__ = "saved_searches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    query: Mapped[str] = mapped_column(String(255))
+    file_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_user_saved_search"),)
+
+
 class CalendarEvent(Base):
     """A calendar entry: created by hand or ingested from a meeting-invite
     (.ics / text/calendar) part of a synced email. Invite updates and

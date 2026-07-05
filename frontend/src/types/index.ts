@@ -210,3 +210,11 @@ export interface TaskItem {
   done: boolean
   created_at: string
 }
+
+export interface SavedSearch {
+  id: string
+  name: string
+  query: string
+  file_type: string | null
+  count: number
+}

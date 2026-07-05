@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { truncate } from '../../lib/utils'
+import { useSearchesStore } from '../../stores/searchesStore'
 import { useTabsStore } from '../../stores/tabsStore'
+import { toast } from '../../stores/toastStore'
 import EmptyState from '../common/EmptyState'
 import { SkeletonList } from '../common/Skeleton'
 import EmailRowItem from './EmailRowItem'
@@ -26,7 +28,25 @@ export default function SearchView({
   fileType?: FileType
 }) {
   const [emails, setEmails] = useState<EmailRow[] | null>(null)
+  const [naming, setNaming] = useState(false)
+  const [saveName, setSaveName] = useState('')
   const { navigate, openTab } = useTabsStore()
+  const { searches, saveSearch } = useSearchesStore()
+  const alreadySaved = searches.some(
+    (s) => s.query === query && (s.file_type ?? undefined) === fileType,
+  )
+
+  const save = async () => {
+    const name = saveName.trim() || query
+    try {
+      await saveSearch(name, query, fileType)
+      toast.success(`“${name}” pinned to the left panel`)
+      setNaming(false)
+      setSaveName('')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save search')
+    }
+  }
 
   useEffect(() => {
     setEmails(null)
@@ -83,6 +103,36 @@ export default function SearchView({
         <span className="ml-auto text-caption text-muted">
           {emails ? `${emails.length}${emails.length === RESULT_LIMIT ? '+' : ''} results` : '…'}
         </span>
+        {alreadySaved ? (
+          <span className="rounded-full border border-divider px-3 py-1 text-caption text-muted">
+            ★ Saved
+          </span>
+        ) : naming ? (
+          <span className="flex items-center gap-1.5">
+            <input
+              autoFocus
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void save()
+                if (e.key === 'Escape') setNaming(false)
+              }}
+              placeholder={truncate(query, 24)}
+              className="w-40 rounded-full border border-divider bg-app px-3 py-1 text-caption text-primary outline-none focus:border-accent"
+            />
+            <button onClick={() => void save()} className="btn-primary rounded-full px-3 py-1 text-caption">
+              Save
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={() => setNaming(true)}
+            title="Pin this search to the left panel as a virtual folder"
+            className="rounded-full border border-divider px-3 py-1 text-caption text-muted transition-colors hover:border-accent hover:text-primary"
+          >
+            ☆ Save search
+          </button>
+        )}
       </div>
 
       {emails === null ? (

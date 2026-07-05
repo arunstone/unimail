@@ -102,17 +102,10 @@ FILE_TYPE_MATCHERS: dict[str, list] = {
 }
 
 
-@router.get("", response_model=list[EmailRowOut])
-def list_emails(
-    account_id: str | None = None,
-    folder: str = "inbox",
-    search: str = "",
-    file_type: str | None = Query(None, pattern="^(pdf|image|doc|sheet|archive)$"),
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
+def build_email_query(db: Session, user: User, account_id: str | None = None,
+                      folder: str = "inbox", search: str = "",
+                      file_type: str | None = None):
+    """Shared filter builder for email listing, saved-search counts etc."""
     q = db.query(Email).join(EmailAccount).filter(EmailAccount.user_id == user.id)
     if account_id:
         q = q.filter(Email.account_id == account_id)
@@ -133,8 +126,23 @@ def list_emails(
                 Email.from_name.ilike(like, escape="\\"),
             )
         )
-    if file_type:
+    if file_type in FILE_TYPE_MATCHERS:
         q = q.join(Attachment).filter(or_(*FILE_TYPE_MATCHERS[file_type])).distinct()
+    return q
+
+
+@router.get("", response_model=list[EmailRowOut])
+def list_emails(
+    account_id: str | None = None,
+    folder: str = "inbox",
+    search: str = "",
+    file_type: str | None = Query(None, pattern="^(pdf|image|doc|sheet|archive)$"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    q = build_email_query(db, user, account_id, folder, search, file_type)
     return (
         q.order_by(Email.received_at.desc())
         .offset((page - 1) * limit)

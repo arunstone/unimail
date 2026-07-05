@@ -9,6 +9,7 @@ import { useNewMailNotifications, useTitleBadge } from '../lib/notifications'
 import { useAccountsStore } from '../stores/accountsStore'
 import { useContactsStore } from '../stores/contactsStore'
 import { useLabelsStore } from '../stores/labelsStore'
+import { useSearchesStore } from '../stores/searchesStore'
 import { useTabsStore } from '../stores/tabsStore'
 import { useUiStore } from '../stores/uiStore'
 import { toast } from '../stores/toastStore'
@@ -19,6 +20,7 @@ export default function Dashboard() {
   const { refreshAll, fetchSummary, fetchAccounts } = useAccountsStore()
   const fetchContacts = useContactsStore((s) => s.fetchContacts)
   const fetchLabels = useLabelsStore((s) => s.fetchLabels)
+  const fetchSearches = useSearchesStore((s) => s.fetchSearches)
   const workspaceOpen = useLabelsStore((s) => s.workspaceOpen)
   const [params, setParams] = useSearchParams()
   const { leftDrawerOpen, rightDrawerOpen, closeDrawers, composeSeed, closeCompose } =
@@ -57,12 +59,13 @@ export default function Dashboard() {
     void refreshAll()
     void fetchContacts()
     void fetchLabels()
+    void fetchSearches()
     const interval = setInterval(() => {
       void fetchSummary()
       void fetchAccounts()
     }, SUMMARY_POLL_MS)
     return () => clearInterval(interval)
-  }, [refreshAll, fetchSummary, fetchAccounts, fetchContacts, fetchLabels])
+  }, [refreshAll, fetchSummary, fetchAccounts, fetchContacts, fetchLabels, fetchSearches])
 
   return (
     <div
