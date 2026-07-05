@@ -272,6 +272,48 @@ class FilterRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class CalendarEvent(Base):
+    """A calendar entry: created by hand or ingested from a meeting-invite
+    (.ics / text/calendar) part of a synced email. Invite updates and
+    cancellations are matched by ical_uid."""
+
+    __tablename__ = "calendar_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    location: Mapped[str] = mapped_column(String(255), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False)
+    source: Mapped[str] = mapped_column(String(10), default="manual")  # manual|invite
+    ical_uid: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    organizer: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(20), default="confirmed")  # confirmed|tentative|cancelled
+    # the email the invite arrived in; detached (not deleted) on disconnect
+    email_id: Mapped[str | None] = mapped_column(
+        ForeignKey("emails.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (UniqueConstraint("user_id", "ical_uid", name="uq_user_ical_uid"),)
+
+
+class Task(Base):
+    """Simple to-do item shown next to the calendar."""
+
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    notes: Mapped[str] = mapped_column(Text, default="")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class JunkStat(Base):
     """Per-user junk-corpus size: how many messages were trained as spam
     and as ham. The classifier only activates once both pass a minimum."""

@@ -37,20 +37,36 @@ export default function LeftPanel() {
             </span>
             <Wordmark className="text-head" />
           </h1>
-          <button
-            onClick={() =>
-              openTab({
-                kind: 'settings',
-                key: 'settings',
-                title: 'Settings',
-                location: { view: 'settings' },
-              })
-            }
-            title="Settings"
-            className="rounded p-1 text-subhead text-muted transition-colors hover:bg-surface hover:text-primary"
-          >
-            ⚙
-          </button>
+          <div className="flex items-center">
+            <button
+              onClick={() =>
+                openTab({
+                  kind: 'calendar',
+                  key: 'calendar',
+                  title: 'Calendar',
+                  location: { view: 'calendar' },
+                })
+              }
+              title="Calendar"
+              className="rounded p-1 text-subhead text-muted transition-colors hover:bg-surface hover:text-primary"
+            >
+              📅
+            </button>
+            <button
+              onClick={() =>
+                openTab({
+                  kind: 'settings',
+                  key: 'settings',
+                  title: 'Settings',
+                  location: { view: 'settings' },
+                })
+              }
+              title="Settings"
+              className="rounded p-1 text-subhead text-muted transition-colors hover:bg-surface hover:text-primary"
+            >
+              ⚙
+            </button>
+          </div>
         </div>
         <div className="text-caption text-muted">All your email in one place</div>
         <button onClick={compose} className="btn-primary mt-3 w-full py-2 text-body">

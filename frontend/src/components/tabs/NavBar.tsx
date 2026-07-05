@@ -58,6 +58,8 @@ function useBreadcrumbs(): BreadcrumbSegment[] {
       return [{ label: 'Labels' }, { label: truncate(loc.name, 30) }]
     case 'settings':
       return [{ label: 'Settings' }]
+    case 'calendar':
+      return [{ label: 'Calendar' }]
   }
 }
 

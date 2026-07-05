@@ -12,6 +12,7 @@ from ..database import SessionLocal, get_db
 from ..deps import get_current_user
 from ..models import (
     Attachment,
+    CalendarEvent,
     Email,
     EmailAccount,
     EmailEmbedding,
@@ -104,6 +105,10 @@ def disconnect_account(
         db.query(model).filter(col.in_(email_ids)).delete(
             synchronize_session=False
         )
+    # calendar events from invites outlive the account; just drop the link
+    db.query(CalendarEvent).filter(CalendarEvent.email_id.in_(email_ids)).update(
+        {CalendarEvent.email_id: None}, synchronize_session=False
+    )
     db.query(Email).filter(Email.account_id == account.id).delete(
         synchronize_session=False
     )

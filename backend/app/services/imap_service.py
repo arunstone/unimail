@@ -116,6 +116,16 @@ def parse_message(uid: int, raw: bytes, flags: tuple) -> ParsedEmail:
                 "size_bytes": len(payload),
                 "content": payload,  # popped by sync before the DB insert
             })
+        elif ctype == "text/calendar":
+            # inline meeting invite without a filename — keep it as an
+            # attachment so sync can feed it to the calendar
+            payload = part.get_payload(decode=True) or b""
+            attachments.append({
+                "filename": part.get_filename() or "invite.ics",
+                "content_type": ctype,
+                "size_bytes": len(payload),
+                "content": payload,
+            })
         elif ctype == "text/plain" and body_text is None:
             body_text = part.get_content()
         elif ctype == "text/html" and body_html is None:

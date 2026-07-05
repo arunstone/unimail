@@ -9,6 +9,7 @@ function TabIcon({ tab }: { tab: Tab }) {
   if (tab.kind === 'contact') return <span className="text-[13px]">👤</span>
   if (tab.kind === 'email') return <span className="text-[13px]">✉️</span>
   if (tab.kind === 'settings') return <span className="text-[13px]">⚙</span>
+  if (tab.kind === 'calendar') return <span className="text-[13px]">📅</span>
   if (tab.provider) return <ProviderIcon provider={tab.provider} size={14} />
   return <span className="text-[13px]">📁</span>
 }

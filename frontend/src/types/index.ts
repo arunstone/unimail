@@ -166,13 +166,14 @@ export type TabLocation =
   | { view: 'search'; query: string; fileType?: FileType }
   | { view: 'label'; labelId: string; name: string }
   | { view: 'settings' }
+  | { view: 'calendar' }
 
 export interface BreadcrumbSegment {
   label: string
   loc?: TabLocation
 }
 
-export type TabKind = 'home' | 'account' | 'email' | 'contact' | 'label' | 'settings'
+export type TabKind = 'home' | 'account' | 'email' | 'contact' | 'label' | 'settings' | 'calendar'
 
 export interface Tab {
   id: string
@@ -185,4 +186,27 @@ export interface Tab {
   historyIndex: number
   /** breadcrumb prefix for email tabs (where the email was opened from) */
   crumbPrefix?: BreadcrumbSegment[]
+}
+
+export interface CalendarEvent {
+  id: string
+  title: string
+  location: string
+  description: string
+  starts_at: string
+  ends_at: string | null
+  all_day: boolean
+  source: 'manual' | 'invite'
+  organizer: string
+  status: 'confirmed' | 'tentative' | 'cancelled'
+  email_id: string | null
+}
+
+export interface TaskItem {
+  id: string
+  title: string
+  notes: string
+  due_at: string | null
+  done: boolean
+  created_at: string
 }

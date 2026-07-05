@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 # ---- Auth ----
@@ -300,3 +300,65 @@ class JunkStatsOut(BaseModel):
 
 class JunkSettingsIn(BaseModel):
     enabled: bool
+
+
+# ---- Calendar & tasks ----
+class EventIn(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    location: str = ""
+    description: str = ""
+    starts_at: datetime
+    ends_at: datetime | None = None
+    all_day: bool = False
+
+
+class EventPatchIn(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=255)
+    location: str | None = None
+    description: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    all_day: bool | None = None
+    status: str | None = Field(None, pattern="^(confirmed|tentative|cancelled)$")
+
+
+class EventOut(BaseModel):
+    id: str
+    title: str
+    location: str
+    description: str
+    starts_at: datetime
+    ends_at: datetime | None
+    all_day: bool
+    source: str
+    organizer: str
+    status: str
+    email_id: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class TaskIn(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    notes: str = ""
+    due_at: datetime | None = None
+
+
+class TaskPatchIn(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=255)
+    notes: str | None = None
+    due_at: datetime | None = None
+    done: bool | None = None
+
+
+class TaskOut(BaseModel):
+    id: str
+    title: str
+    notes: str
+    due_at: datetime | None
+    done: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

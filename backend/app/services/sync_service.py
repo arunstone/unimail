@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Attachment, Contact, Email, EmailAccount, Folder, SyncLog
 from ..security import decrypt_secret, encrypt_secret
-from . import filter_service, imap_service, junk_service, oauth, storage
+from . import filter_service, ics_service, imap_service, junk_service, oauth, storage
 
 logger = logging.getLogger("unimail.sync")
 
@@ -238,6 +238,12 @@ def sync_account(db: Session, account_id: str) -> None:
                     db.flush()
                     for att in parsed.attachments:
                         content = att.pop("content", b"")
+                        # meeting invites also land on the calendar
+                        if content and (
+                            "calendar" in (att["content_type"] or "")
+                            or att["filename"].lower().endswith(".ics")
+                        ):
+                            ics_service.ingest(db, account.user_id, row, content)
                         att_row = Attachment(email_id=row.id, **att)
                         db.add(att_row)
                         if content and storage.enabled():

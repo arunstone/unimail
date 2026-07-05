@@ -10,6 +10,7 @@ import GraphView from '../views/GraphView'
 import HomeView from '../views/HomeView'
 import LabelTimelineView from '../views/LabelTimelineView'
 import SearchView from '../views/SearchView'
+import CalendarView from '../views/CalendarView'
 import SettingsView from '../views/SettingsView'
 
 function CurrentView() {
@@ -38,6 +39,8 @@ function CurrentView() {
       return <LabelTimelineView labelId={loc.labelId} />
     case 'settings':
       return <SettingsView />
+    case 'calendar':
+      return <CalendarView />
   }
 }
 
