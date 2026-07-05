@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from .config import settings
 from .database import Base, engine
-from .routers import accounts, auth, contacts, drafts, emails, filters, graph, labels, sync
+from .routers import accounts, auth, contacts, drafts, emails, filters, graph, junk, labels, sync
 from .services import storage
 from .services.sync_service import sync_all_accounts
 
@@ -102,6 +102,7 @@ app.include_router(graph.router)
 app.include_router(labels.router)
 app.include_router(drafts.router)
 app.include_router(filters.router)
+app.include_router(junk.router)
 
 
 @app.get("/api/health")

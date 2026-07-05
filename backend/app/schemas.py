@@ -287,3 +287,16 @@ class SyncStatusOut(BaseModel):
     sync_status: str
     last_synced_at: datetime | None
     sync_error: str | None
+
+
+# ---- Junk filter ----
+class JunkStatsOut(BaseModel):
+    enabled: bool
+    spam_trained: int
+    ham_trained: int
+    min_needed: int
+    active: bool  # enabled AND trained past the minimum → scoring new mail
+
+
+class JunkSettingsIn(BaseModel):
+    enabled: bool

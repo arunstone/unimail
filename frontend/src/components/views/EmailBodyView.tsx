@@ -234,6 +234,41 @@ export default function EmailBodyView({ emailId }: { emailId: string }) {
         <div className="flex shrink-0 gap-1.5">
           <button className={actionBtn} onClick={replyQuoted}>↩ Reply</button>
           <button className={actionBtn} onClick={forward}>↪ Forward</button>
+          {opened.folder_role === 'spam' ? (
+            <button
+              className={actionBtn}
+              title="Not spam — train the junk filter and move back to Inbox"
+              onClick={async () => {
+                try {
+                  await api.post(`/api/emails/${opened.id}/not-spam`)
+                  toast.success('Marked not spam — moved to Inbox')
+                  void refreshAll()
+                  closeTab(activeTabId)
+                } catch {
+                  toast.error('Action failed')
+                }
+              }}
+            >
+              ✓ Not spam
+            </button>
+          ) : (
+            <button
+              className={actionBtn}
+              title="Mark as spam — trains the junk filter"
+              onClick={async () => {
+                try {
+                  await api.post(`/api/emails/${opened.id}/spam`)
+                  toast.success('Marked as spam')
+                  void refreshAll()
+                  closeTab(activeTabId)
+                } catch {
+                  toast.error('Action failed')
+                }
+              }}
+            >
+              🚫 Spam
+            </button>
+          )}
           <button className={actionBtn} onClick={() => patch({ folder_role: 'archive' }, 'Archived')}>
             🗄
           </button>

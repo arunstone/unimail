@@ -35,7 +35,7 @@ from ..schemas import (
     ThreadMessageOut,
     UploadOut,
 )
-from ..services import imap_actions, imap_service, storage
+from ..services import imap_actions, imap_service, junk_service, storage
 from ..services.smtp_service import send_email
 from ..services.sync_service import connect_account
 
@@ -468,12 +468,48 @@ def patch_email(email_id: str, data: EmailPatchIn, background: BackgroundTasks,
             moved_to = data.folder_role
     db.commit()
     db.refresh(row)
+    # a manual move into/out of spam is also a lesson for the junk filter
+    if moved_to == "spam" or (moved_to == "inbox" and row.spam_trained == "spam"):
+        try:
+            junk_service.train(db, user.id, row, as_spam=moved_to == "spam")
+        except Exception:
+            logger.warning("Junk training on move failed", exc_info=True)
     # mirror the change on the mail server so the next sync doesn't revert
     # it (flags first: the move detaches the row's UID)
     if flags_changed:
         background.add_task(imap_actions.push_flags, row.id)
     if moved_to:
         background.add_task(imap_actions.push_move, row.id, moved_to)
+    return row
+
+
+@router.post("/{email_id}/spam", response_model=EmailRowOut)
+def mark_spam(email_id: str, background: BackgroundTasks,
+              user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Train the junk filter with this message as spam and move it to the
+    Spam folder (mirrored to the mail server)."""
+    row = _own_email(db, user, email_id)
+    junk_service.train(db, user.id, row, as_spam=True)
+    if row.folder_role != "spam":
+        row.folder_role = "spam"
+        db.commit()
+        background.add_task(imap_actions.push_move, row.id, "spam")
+    db.refresh(row)
+    return row
+
+
+@router.post("/{email_id}/not-spam", response_model=EmailRowOut)
+def mark_not_spam(email_id: str, background: BackgroundTasks,
+                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Train the junk filter with this message as not spam; if it sits in
+    the Spam folder, move it back to the inbox."""
+    row = _own_email(db, user, email_id)
+    junk_service.train(db, user.id, row, as_spam=False)
+    if row.folder_role == "spam":
+        row.folder_role = "inbox"
+        db.commit()
+        background.add_task(imap_actions.push_move, row.id, "inbox")
+    db.refresh(row)
     return row
 
 

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Attachment, Contact, Email, EmailAccount, Folder, SyncLog
 from ..security import decrypt_secret, encrypt_secret
-from . import filter_service, imap_service, oauth, storage
+from . import filter_service, imap_service, junk_service, oauth, storage
 
 logger = logging.getLogger("unimail.sync")
 
@@ -139,6 +139,8 @@ def sync_account(db: Session, account_id: str) -> None:
     db.commit()
 
     rules = filter_service.load_rules(db, account.user_id)
+    # non-None once the user's junk filter is on and trained enough
+    junk_stats = junk_service.ready(db, account.user_id)
     new_count = 0
     try:
         client = connect_account(db, account)
@@ -258,12 +260,26 @@ def sync_account(db: Session, account_id: str) -> None:
                     new_count += 1
 
                     # user filter rules on fresh inbox mail
-                    if rules and role == "inbox":
-                        move_to = filter_service.apply_local_actions(db, row, rules)
-                        if row.is_read and not parsed.is_read:
-                            seen_uids.append(parsed.imap_uid)
-                        if row.is_starred and not parsed.is_starred:
-                            star_uids.append(parsed.imap_uid)
+                    if role == "inbox":
+                        move_to = None
+                        if rules:
+                            move_to = filter_service.apply_local_actions(db, row, rules)
+                            if row.is_read and not parsed.is_read:
+                                seen_uids.append(parsed.imap_uid)
+                            if row.is_starred and not parsed.is_starred:
+                                star_uids.append(parsed.imap_uid)
+                        # Bayesian junk check on whatever the rules left alone
+                        if move_to is None and junk_stats is not None:
+                            try:
+                                score = junk_service.classify(db, junk_stats, row)
+                                if score >= junk_service.SPAM_THRESHOLD:
+                                    move_to = "spam"
+                                    logger.info(
+                                        "Junk filter caught message from %s (score %.3f)",
+                                        row.from_email, score,
+                                    )
+                            except Exception:
+                                logger.warning("Junk scoring failed", exc_info=True)
                         if move_to:
                             pending_moves.append((row, move_to))
 

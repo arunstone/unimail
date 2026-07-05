@@ -53,7 +53,14 @@ def push_move(email_id: str, target_role: str) -> None:
     db = SessionLocal()
     try:
         row = db.get(Email, email_id)
-        if not _pushable(row):
+        # a detached UID (row moved server-side, not yet re-synced) can be
+        # recovered by Message-ID so e.g. "Not spam" right after the junk
+        # filter moved the message still reaches the server
+        recover_uid = (
+            row is not None and row.imap_uid is None and row.message_id
+            and row.folder_name and not row.folder_name.startswith("__")
+        )
+        if not _pushable(row) and not recover_uid:
             return
         target = (
             db.query(Folder)
@@ -65,6 +72,11 @@ def push_move(email_id: str, target_role: str) -> None:
         client = connect_account(db, row.account)
         try:
             client.select_folder(row.folder_name)
+            if row.imap_uid is None:
+                found = client.search(["HEADER", "Message-ID", row.message_id])
+                if not found:
+                    return
+                row.imap_uid = found[0]
             try:
                 client.move([row.imap_uid], target.name)
             except Exception:  # server without MOVE capability

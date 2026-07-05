@@ -41,6 +41,8 @@ class User(Base):
     reset_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # adaptive junk filter on/off (training is kept either way)
+    junk_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     accounts: Mapped[list["EmailAccount"]] = relationship(
@@ -134,6 +136,9 @@ class Email(Base):
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
     has_attachments: Mapped[bool] = mapped_column(Boolean, default=False)
+    # what the junk classifier was taught with this message: spam|ham|NULL
+    # (recorded so re-training the other way reverses the first lesson)
+    spam_trained: Mapped[str | None] = mapped_column(String(4), nullable=True)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, index=True
     )
@@ -265,6 +270,29 @@ class FilterRule(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class JunkStat(Base):
+    """Per-user junk-corpus size: how many messages were trained as spam
+    and as ham. The classifier only activates once both pass a minimum."""
+
+    __tablename__ = "junk_stats"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    spam_messages: Mapped[int] = mapped_column(Integer, default=0)
+    ham_messages: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class JunkToken(Base):
+    """Bayesian junk-filter vocabulary: per user, how many trained spam/ham
+    messages contained this token."""
+
+    __tablename__ = "junk_tokens"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    spam_count: Mapped[int] = mapped_column(Integer, default=0)
+    ham_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class SyncLog(Base):
