@@ -53,8 +53,8 @@ services:
     image: boky/postfix
     restart: unless-stopped
     environment:
-      ALLOWED_SENDER_DOMAINS: example.com
-      HOSTNAME: mail.example.com
+      ALLOWED_SENDER_DOMAINS: ${SMTP_ALLOWED_SENDER_DOMAINS:-example.com}
+      HOSTNAME: ${SMTP_HOSTNAME:-mail.example.com}
     healthcheck:
       test: ["CMD", "sh", "-c", "/scripts/healthcheck.sh"]
       interval: 30s
